@@ -41,3 +41,10 @@
 /src
 /mapfile
 /tools/python/__pycache__/
+
+# Cross-compilation output
+/install/
+ffmpeg-rv1126b-*.tar.gz
+
+# Build directories
+/ffbuild/
