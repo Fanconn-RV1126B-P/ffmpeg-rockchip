@@ -18,7 +18,8 @@ echo ""
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="${FFMPEG_PREFIX:-$SCRIPT_DIR/install}"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INSTALL_DIR="${FFMPEG_PREFIX:-$REPO_ROOT/install}"
 
 if [ ! -d "$INSTALL_DIR" ]; then
     echo -e "${RED}✗ Install directory not found: $INSTALL_DIR${NC}"

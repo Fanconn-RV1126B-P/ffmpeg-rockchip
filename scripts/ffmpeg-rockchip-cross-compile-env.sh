@@ -14,7 +14,7 @@
 #       └── rv1126b_linux6.1_sdk_v1.1.0/
 #
 # Usage:
-#   source ./ffmpeg-rockchip-cross-compile-env.sh
+#   source ./scripts/ffmpeg-rockchip-cross-compile-env.sh
 #
 
 # Colors for output
@@ -32,8 +32,9 @@ echo "  Target: RV1126B-P (ARM64/aarch64)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Detect SDK location (assume it's a sibling directory)
-SDK_ROOT="$SCRIPT_DIR/../RV1126B-P-SDK/rv1126b_linux6.1_sdk_v1.1.0"
+# Detect SDK location (assume it's a sibling of repo root)
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SDK_ROOT="$REPO_ROOT/../RV1126B-P-SDK/rv1126b_linux6.1_sdk_v1.1.0"
 
 # Check if SDK exists
 if [ ! -d "$SDK_ROOT" ]; then

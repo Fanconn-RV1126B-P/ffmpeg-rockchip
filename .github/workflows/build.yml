@@ -183,7 +183,7 @@ jobs:
           cp install/bin/ffmpeg install/bin/ffprobe dist/ffmpeg-rv1126b/bin/
 
           # On-device test script
-          cp test-on-device.sh dist/ffmpeg-rv1126b/
+          cp scripts/test-on-device.sh dist/ffmpeg-rv1126b/
 
           # Quick README for the release tarball
           cat > dist/ffmpeg-rv1126b/README.txt <<EOF

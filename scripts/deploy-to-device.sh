@@ -45,7 +45,7 @@ if [ ! -d "$INSTALL_SRC" ] || [ ! -f "$INSTALL_SRC/bin/ffmpeg" ]; then
     echo -e "${RED}✗ Built ffmpeg not found at: $INSTALL_SRC/bin/ffmpeg${NC}"
     echo ""
     echo "Run the build first:"
-    echo "  source ffmpeg-rockchip-cross-compile-env.sh"
+    echo "  source scripts/ffmpeg-rockchip-cross-compile-env.sh"
     echo "  ./configure ... && make -j\$(nproc) && make install"
     exit 1
 fi
@@ -97,8 +97,8 @@ rsync -avz --progress \
     "${DEVICE_USER}@${DEVICE_IP}:${INSTALL_DIR}/bin/"
 
 # Also sync test script
-if [ -f "$REPO_ROOT/test-on-device.sh" ]; then
-    rsync -avz "$REPO_ROOT/test-on-device.sh" \
+if [ -f "$REPO_ROOT/scripts/test-on-device.sh" ]; then
+  rsync -avz "$REPO_ROOT/scripts/test-on-device.sh" \
         "${DEVICE_USER}@${DEVICE_IP}:${INSTALL_DIR}/bin/ffmpeg-test.sh"
 fi
 
