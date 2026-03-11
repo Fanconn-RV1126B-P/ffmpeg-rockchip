@@ -48,3 +48,15 @@ ffmpeg-rv1126b-*.tar.gz
 
 # Build directories
 /ffbuild/
+
+# RV1126B-P: sysroot tarballs and checksums (downloaded by CI, not for repo)
+rv1126b-sysroot-*.tar.gz
+rv1126b-sysroot-*.tar.gz.sha256
+/sysroot/
+
+# RV1126B-P: generated cross-compilation helpers
+/aarch64-pkg-config
+/aarch64-pkg-config-test
+
+# git housekeeping artifacts
+/.git-rewrite/
