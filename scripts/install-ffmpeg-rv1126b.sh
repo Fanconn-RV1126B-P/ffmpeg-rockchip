@@ -4,7 +4,7 @@
 # One-line installer for FFmpeg-Rockchip on RV1126B-P
 #
 # Usage (recommended, run on host PC):
-#   curl -fsSL https://github.com/Fanconn-RV1126B-P/ffmpeg-rockchip/releases/latest/download/install-ffmpeg-rv1126b.sh | sh -s -- 192.168.1.95
+#   curl -fsSL https://github.com/Fanconn-RV1126B-P/ffmpeg-rockchip/releases/latest/download/install-ffmpeg-rv1126b.sh | sh -s -- <DEVICE_HOST_OR_IP>
 #
 # Optional local mode (run on device directly):
 #   curl -fsSL https://github.com/Fanconn-RV1126B-P/ffmpeg-rockchip/releases/latest/download/install-ffmpeg-rv1126b.sh | sh

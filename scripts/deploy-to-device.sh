@@ -9,9 +9,9 @@
 #   ./scripts/deploy-to-device.sh [DEVICE_IP] [USER] [INSTALL_DIR]
 #
 # Examples:
-#   ./scripts/deploy-to-device.sh 192.168.1.95
-#   ./scripts/deploy-to-device.sh 192.168.1.95 root /usr/local
-#   DEVICE_IP=192.168.1.95 ./scripts/deploy-to-device.sh
+#   ./scripts/deploy-to-device.sh <DEVICE_HOST_OR_IP>
+#   ./scripts/deploy-to-device.sh <DEVICE_HOST_OR_IP> root /usr/local
+#   DEVICE_IP=<DEVICE_HOST_OR_IP> ./scripts/deploy-to-device.sh
 #
 
 set -euo pipefail
@@ -21,10 +21,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-DEVICE_IP="${1:-${DEVICE_IP:-192.168.1.95}}"
+DEVICE_IP="${1:-${DEVICE_IP:-}}"
 DEVICE_USER="${2:-${DEVICE_USER:-root}}"
 INSTALL_DIR="${3:-${INSTALL_DIR:-/usr/local}}"
 INSTALL_SRC="${FFMPEG_PREFIX:-$REPO_ROOT/install}"
+
+if [ -z "$DEVICE_IP" ]; then
+  echo -e "${RED}✗ Device host/IP is required${NC}"
+  echo "Usage: $0 <device-host-or-ip> [user] [install-dir]"
+  exit 1
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
