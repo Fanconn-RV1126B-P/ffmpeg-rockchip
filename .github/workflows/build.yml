@@ -17,8 +17,8 @@ env:
   # Opt in early to Node.js 24 runtime for JavaScript actions
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   # Version of the sysroot asset stored as a GitHub Release
-  # Run `scripts/package-sysroot.sh` locally and upload to a release tagged `sysroot-v1.1.0`
-  SYSROOT_RELEASE_TAG: sysroot-v1.1.1
+  # Run `scripts/package-sysroot.sh` locally and upload to a release tagged `sysroot-v1.1.1`
+  SYSROOT_VERSION: v1.1.1
   SYSROOT_ASSET_PATTERN: "rv1126b-sysroot-minimal-*.tar.gz"
 
 jobs:
@@ -52,7 +52,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: sysroot
-          key: rv1126b-sysroot-${{ env.SYSROOT_RELEASE_TAG }}
+          key: rv1126b-sysroot-${{ env.SYSROOT_VERSION }}
 
       - name: Download RV1126B-P sysroot from GitHub Release
         if: steps.cache-sysroot.outputs.cache-hit != 'true'
@@ -60,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Downloading sysroot release asset..."
-          gh release download "${{ env.SYSROOT_RELEASE_TAG }}" \
+          gh release download "sysroot-${{ env.SYSROOT_VERSION }}" \
             --repo "${{ github.repository }}" \
             --pattern "${{ env.SYSROOT_ASSET_PATTERN }}" \
             --dir /tmp/sysroot-dl/

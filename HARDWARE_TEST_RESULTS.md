@@ -3,7 +3,7 @@
 
 ### Test Environment
 - **Device**: RV1126B-P EVB v1.0
-- **IP Address**: 192.168.1.95
+- **IP Address**: `<DEVICE_IP>` (192.168.1.95 for this test)
 - **Firmware**: rockchip_rv1126bp_ipc_64_evb1_v10_defconfig
 - **Camera**: IMX415 (3840x2160 @ 30fps)
 - **FFmpeg Version**: 772be3cc8e (with nyanmisaka MPP/RGA patches)
@@ -226,6 +226,6 @@ ffmpeg -rtsp_transport tcp -i rtsp://127.0.0.1:554/live/0 \
 
 **Test Date**: January 23, 2026  
 **Tested By**: Community validation  
-**Device IP**: 192.168.1.95  
+**Device IP**: `<DEVICE_IP>` (192.168.1.95 for this test)  
 **Repository**: https://github.com/Fanconn-RV1126B-P/ffmpeg-rockchip  
-**JIRA**: RV1126BP-11
+**JIRA**: RV1126BP-34
