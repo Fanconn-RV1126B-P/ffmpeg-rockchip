@@ -10,7 +10,7 @@
 - Added host-driven installer script for release consumption:
   - `scripts/install-ffmpeg-rv1126b.sh`
   - supports host execution and remote install to target device over SSH/SCP.
-- Reorganized repository helper scripts into `scripts/` and test result documents into `rk1126b/`.
+- Reorganized repository helper scripts into `scripts/` and test result documents into `rv1126b/`.
 - Updated release notes/assets and cleaned stale release artifacts.
 
 ### Current testing scope
