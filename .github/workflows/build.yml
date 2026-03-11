@@ -70,25 +70,38 @@ jobs:
       # ── Configure ───────────────────────────────────────────────────────────
       - name: Configure FFmpeg
         run: |
-          STAGING="$(pwd)/sysroot"
-          INSTALL_DIR="$(pwd)/install"
+          STAGING="$(realpath sysroot)"
+          INSTALL_DIR="$(realpath .)/install"
 
-          export PKG_CONFIG_PATH="$STAGING/usr/lib/pkgconfig"
-          export PKG_CONFIG_SYSROOT_DIR="$STAGING"
-          export PKG_CONFIG_LIBDIR="$STAGING/usr/lib/pkgconfig"
+          # Create a pkg-config wrapper with the staging paths baked in.
+          # This is necessary because:
+          #  1. FFmpeg configure auto-detects pkg-config and may not pick up env vars.
+          #  2. PKG_CONFIG_SYSROOT_DIR in the wrapper makes pkg-config return
+          #     absolute paths prefixed by $STAGING, so the linker finds our libs.
+          PKG_CONFIG_WRAPPER="$(pwd)/aarch64-pkg-config"
+          printf '#!/bin/sh\nexport PKG_CONFIG_DIR=\nexport PKG_CONFIG_LIBDIR="%s/usr/lib/pkgconfig"\nexport PKG_CONFIG_SYSROOT_DIR="%s"\nexec pkg-config "$@"\n' \
+            "$STAGING" "$STAGING" > "$PKG_CONFIG_WRAPPER"
+          chmod +x "$PKG_CONFIG_WRAPPER"
 
-          echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
-          pkg-config --list-all 2>/dev/null | grep -E "rockchip|rga|drm" || true
+          echo "Staging: $STAGING"
+          echo "Checking pkg-config wrapper:"
+          "$PKG_CONFIG_WRAPPER" --list-all 2>/dev/null | grep -E "rockchip|librga|libdrm" || true
+          echo "libdrm cflags: $("$PKG_CONFIG_WRAPPER" --cflags libdrm 2>/dev/null || echo 'FAILED')"
+          echo "libdrm libs:   $("$PKG_CONFIG_WRAPPER" --libs   libdrm 2>/dev/null || echo 'FAILED')"
 
+          # NOTE: Do NOT pass --sysroot here.
+          # The Ubuntu cross-compiler (gcc-aarch64-linux-gnu) uses its own multiarch
+          # sysroot for libc/libgcc. Passing our minimal sysroot breaks those lookups.
+          # Instead we use --extra-cflags/-ldflags to inject our lib/include paths.
           ./configure \
             --prefix="$INSTALL_DIR" \
             --enable-cross-compile \
             --cross-prefix=aarch64-linux-gnu- \
             --arch=aarch64 \
             --target-os=linux \
-            --sysroot="$STAGING" \
-            --extra-cflags="-I$STAGING/usr/include" \
-            --extra-ldflags="-L$STAGING/usr/lib -Wl,-rpath-link,$STAGING/usr/lib" \
+            --pkg-config="$PKG_CONFIG_WRAPPER" \
+            --extra-cflags="-I${STAGING}/usr/include" \
+            --extra-ldflags="-L${STAGING}/usr/lib -Wl,-rpath-link,${STAGING}/usr/lib" \
             --enable-gpl \
             --enable-version3 \
             --enable-libdrm \
