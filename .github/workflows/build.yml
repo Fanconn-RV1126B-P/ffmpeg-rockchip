@@ -24,6 +24,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
       contents: write   # needed to create releases and upload assets
 

@@ -46,8 +46,8 @@
 /install/
 ffmpeg-rv1126b-*.tar.gz
 
-# Build directories
-/ffbuild/
+# Build logs
+/ffbuild/config.log
 
 # RV1126B-P: sysroot tarballs and checksums (downloaded by CI, not for repo)
 rv1126b-sysroot-*.tar.gz
