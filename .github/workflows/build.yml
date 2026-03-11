@@ -1,0 +1,255 @@
+name: Build FFmpeg-Rockchip for RV1126B-P
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a GitHub Release with built binaries'
+        type: boolean
+        default: false
+
+env:
+  # Version of the sysroot asset stored as a GitHub Release
+  # Run `scripts/package-sysroot.sh` locally and upload to a release tagged `sysroot-v1.1.0`
+  SYSROOT_RELEASE_TAG: sysroot-v1.1.0
+  SYSROOT_ASSET_PATTERN: "rv1126b-sysroot-minimal-*.tar.gz"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write   # needed to create releases and upload assets
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so `git describe` works
+
+      # ── Toolchain ───────────────────────────────────────────────────────────
+      - name: Install aarch64 cross-compilation toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            pkg-config \
+            libpkgconf-dev
+          aarch64-linux-gnu-gcc --version
+
+      # ── Sysroot (cache) ──────────────────────────────────────────────────────
+      - name: Cache RV1126B-P minimal sysroot
+        id: cache-sysroot
+        uses: actions/cache@v4
+        with:
+          path: sysroot
+          key: rv1126b-sysroot-${{ env.SYSROOT_RELEASE_TAG }}
+
+      - name: Download RV1126B-P sysroot from GitHub Release
+        if: steps.cache-sysroot.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Downloading sysroot release asset..."
+          gh release download "${{ env.SYSROOT_RELEASE_TAG }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ env.SYSROOT_ASSET_PATTERN }}" \
+            --dir /tmp/sysroot-dl/
+          mkdir -p sysroot
+          tar xzf /tmp/sysroot-dl/rv1126b-sysroot-minimal-*.tar.gz -C sysroot --strip-components=1
+          echo "Sysroot contents:"
+          ls -la sysroot/usr/include/ sysroot/usr/lib/*.so* 2>/dev/null || ls -la sysroot/
+
+      # ── Configure ───────────────────────────────────────────────────────────
+      - name: Configure FFmpeg
+        run: |
+          STAGING="$(pwd)/sysroot"
+          INSTALL_DIR="$(pwd)/install"
+
+          export PKG_CONFIG_PATH="$STAGING/usr/lib/pkgconfig"
+          export PKG_CONFIG_SYSROOT_DIR="$STAGING"
+          export PKG_CONFIG_LIBDIR="$STAGING/usr/lib/pkgconfig"
+
+          echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
+          pkg-config --list-all 2>/dev/null | grep -E "rockchip|rga|drm" || true
+
+          ./configure \
+            --prefix="$INSTALL_DIR" \
+            --enable-cross-compile \
+            --cross-prefix=aarch64-linux-gnu- \
+            --arch=aarch64 \
+            --target-os=linux \
+            --sysroot="$STAGING" \
+            --extra-cflags="-I$STAGING/usr/include" \
+            --extra-ldflags="-L$STAGING/usr/lib -Wl,-rpath-link,$STAGING/usr/lib" \
+            --enable-gpl \
+            --enable-version3 \
+            --enable-libdrm \
+            --enable-rkmpp \
+            --enable-rkrga \
+            --disable-doc \
+            --disable-htmlpages \
+            --disable-manpages \
+            --disable-podpages \
+            --disable-txtpages
+
+      # ── Build ────────────────────────────────────────────────────────────────
+      - name: Build FFmpeg
+        run: make -j$(nproc)
+
+      - name: Install FFmpeg
+        run: make install
+
+      # ── Verify ───────────────────────────────────────────────────────────────
+      - name: Verify cross-compiled binary
+        run: |
+          echo "=== Binary Architecture ==="
+          file install/bin/ffmpeg install/bin/ffprobe
+
+          echo ""
+          echo "=== Shared Library Dependencies ==="
+          aarch64-linux-gnu-readelf -d install/bin/ffmpeg \
+            | grep NEEDED | awk '{print $5}' | tr -d '[]'
+
+          echo ""
+          echo "=== Binary Sizes ==="
+          du -sh install/bin/ffmpeg install/bin/ffprobe
+
+          # Must be aarch64
+          file install/bin/ffmpeg | grep -q "ARM aarch64" || \
+            { echo "ERROR: Binary is not aarch64!"; exit 1; }
+
+          # Must link against MPP
+          aarch64-linux-gnu-readelf -d install/bin/ffmpeg \
+            | grep -q "librockchip_mpp" || \
+            { echo "ERROR: MPP not linked!"; exit 1; }
+
+          # Must link against RGA
+          aarch64-linux-gnu-readelf -d install/bin/ffmpeg \
+            | grep -q "librga" || \
+            { echo "ERROR: RGA not linked!"; exit 1; }
+
+          echo ""
+          echo "✓ Verification passed"
+
+      # ── Package ──────────────────────────────────────────────────────────────
+      - name: Package release artifacts
+        id: package
+        run: |
+          FFMPEG_VERSION=$(cat RELEASE)
+          BUILD_DATE=$(date +%Y%m%d)
+          COMMIT_SHORT=$(git rev-parse --short HEAD)
+          TARBALL_NAME="ffmpeg-rv1126b-${FFMPEG_VERSION}-${BUILD_DATE}-${COMMIT_SHORT}.tar.gz"
+
+          mkdir -p dist/ffmpeg-rv1126b/bin
+
+          # Binaries
+          cp install/bin/ffmpeg install/bin/ffprobe dist/ffmpeg-rv1126b/bin/
+
+          # On-device test script
+          cp test-on-device.sh dist/ffmpeg-rv1126b/
+
+          # Quick README for the release tarball
+          cat > dist/ffmpeg-rv1126b/README.txt <<EOF
+          FFmpeg-Rockchip for RV1126B-P
+          FFmpeg version : ${FFMPEG_VERSION}
+          Built          : ${BUILD_DATE}
+          Commit         : ${COMMIT_SHORT}
+          Target         : aarch64 / RV1126B-P (Linux 6.1)
+          MPP support    : h264_rkmpp, hevc_rkmpp, av1_rkmpp, vp8_rkmpp, vp9_rkmpp, mjpeg_rkmpp
+          RGA filters    : scale_rkrga, vpp_rkrga, overlay_rkrga
+
+          Installation
+          ------------
+          tar xzf ${TARBALL_NAME} -C /usr/local/
+          ldconfig
+
+          Verify
+          ------
+          /usr/local/bin/ffmpeg -codecs | grep rkmpp
+          EOF
+
+          # Create tarball
+          tar czf "dist/${TARBALL_NAME}" -C dist ffmpeg-rv1126b/
+          sha256sum "dist/${TARBALL_NAME}" > "dist/${TARBALL_NAME}.sha256"
+
+          # Make name available to subsequent steps
+          echo "TARBALL_NAME=${TARBALL_NAME}" >> "$GITHUB_ENV"
+          echo "FFMPEG_VERSION=${FFMPEG_VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=${BUILD_DATE}" >> "$GITHUB_ENV"
+
+          echo ""
+          echo "=== Packaged artifact ==="
+          ls -lh dist/*.tar.gz dist/*.sha256
+          cat "dist/${TARBALL_NAME}.sha256"
+
+      # ── Upload workflow artifact ──────────────────────────────────────────────
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-rv1126b-${{ env.FFMPEG_VERSION }}-${{ env.BUILD_DATE }}
+          path: dist/*.tar.gz
+          retention-days: 30
+
+      # ── GitHub Release (on tag push or manual trigger) ────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build-{0}', env.BUILD_DATE) }}
+          name: FFmpeg-Rockchip ${{ env.FFMPEG_VERSION }} for RV1126B-P
+          body: |
+            ## FFmpeg-Rockchip ${{ env.FFMPEG_VERSION }} — RV1126B-P Build
+
+            Cross-compiled FFmpeg with Rockchip MPP and RGA hardware acceleration.
+
+            | Property | Value |
+            |---|---|
+            | Target | RV1126B-P (aarch64 / Linux 6.1) |
+            | FFmpeg Version | `${{ env.FFMPEG_VERSION }}` |
+            | Build Date | `${{ env.BUILD_DATE }}` |
+            | Commit | `${{ github.sha }}` |
+
+            ### Hardware Support
+            | Feature | Codecs |
+            |---|---|
+            | **MPP Decoders** | `h264_rkmpp` `hevc_rkmpp` `av1_rkmpp` `vp8_rkmpp` `vp9_rkmpp` `mjpeg_rkmpp` `mpeg1_rkmpp` `mpeg2_rkmpp` `mpeg4_rkmpp` |
+            | **MPP Encoders** | `h264_rkmpp` `hevc_rkmpp` `mjpeg_rkmpp` |
+            | **RGA Filters** | `scale_rkrga` `vpp_rkrga` `overlay_rkrga` |
+
+            ### Installation on RV1126B-P
+            ```bash
+            # Download and extract
+            tar xzf ffmpeg-rv1126b-*.tar.gz -C /usr/local/
+            ldconfig
+
+            # Verify
+            /usr/local/bin/ffmpeg -codecs | grep rkmpp
+
+            # Run hardware tests
+            bash /usr/local/test-on-device.sh
+            ```
+
+            ### Common Usage
+            ```bash
+            # Record camera stream (no transcode)
+            ffmpeg -rtsp_transport tcp -i rtsp://127.0.0.1:554/live/0 -c copy -t 60 cam.mp4
+
+            # Hardware H.264 encode (1080p real-time)
+            ffmpeg -i input.mp4 -c:v h264_rkmpp -b:v 4M output.mp4
+
+            # Hardware scale via RGA
+            ffmpeg -i input-4k.mp4 -vf scale_rkrga=1920:1080 -c:v h264_rkmpp output-1080p.mp4
+            ```
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+          draft: false
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
