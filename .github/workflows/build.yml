@@ -73,26 +73,32 @@ jobs:
           STAGING="$(realpath sysroot)"
           INSTALL_DIR="$(realpath .)/install"
 
-          # Create a pkg-config wrapper with the staging paths baked in.
-          # This is necessary because:
-          #  1. FFmpeg configure auto-detects pkg-config and may not pick up env vars.
-          #  2. PKG_CONFIG_SYSROOT_DIR in the wrapper makes pkg-config return
-          #     absolute paths prefixed by $STAGING, so the linker finds our libs.
+          # Patch .pc files to embed the absolute staging path as prefix.
+          # This is the most reliable approach: pkg-config then emits
+          # -L${STAGING}/usr/lib and -I${STAGING}/usr/include directly,
+          # with no dependency on PKG_CONFIG_SYSROOT_DIR path rewriting.
+          echo "Patching pkg-config files with staging prefix: $STAGING"
+          for pc in sysroot/usr/lib/pkgconfig/*.pc; do
+            sed -i "s|^prefix=.*|prefix=${STAGING}/usr|" "$pc"
+          done
+
+          # Create a pkg-config wrapper that restricts to our sysroot only.
+          # PKG_CONFIG_DIR= clears the default search path so system .pc files
+          # (e.g. host libdrm) cannot interfere.
           PKG_CONFIG_WRAPPER="$(pwd)/aarch64-pkg-config"
-          printf '#!/bin/sh\nexport PKG_CONFIG_DIR=\nexport PKG_CONFIG_LIBDIR="%s/usr/lib/pkgconfig"\nexport PKG_CONFIG_SYSROOT_DIR="%s"\nexec pkg-config "$@"\n' \
-            "$STAGING" "$STAGING" > "$PKG_CONFIG_WRAPPER"
+          printf '#!/bin/sh\nexport PKG_CONFIG_DIR=\nexport PKG_CONFIG_LIBDIR="%s/usr/lib/pkgconfig"\nexec pkg-config "$@"\n' \
+            "$STAGING" > "$PKG_CONFIG_WRAPPER"
           chmod +x "$PKG_CONFIG_WRAPPER"
 
-          echo "Staging: $STAGING"
-          echo "Checking pkg-config wrapper:"
-          "$PKG_CONFIG_WRAPPER" --list-all 2>/dev/null | grep -E "rockchip|librga|libdrm" || true
-          echo "libdrm cflags: $("$PKG_CONFIG_WRAPPER" --cflags libdrm 2>/dev/null || echo 'FAILED')"
-          echo "libdrm libs:   $("$PKG_CONFIG_WRAPPER" --libs   libdrm 2>/dev/null || echo 'FAILED')"
+          echo "Checking pkg-config wrapper output:"
+          "$PKG_CONFIG_WRAPPER" --libs   libdrm && \
+          "$PKG_CONFIG_WRAPPER" --cflags libdrm && \
+          "$PKG_CONFIG_WRAPPER" --libs   rockchip_mpp && \
+          "$PKG_CONFIG_WRAPPER" --libs   librga
 
-          # NOTE: Do NOT pass --sysroot here.
-          # The Ubuntu cross-compiler (gcc-aarch64-linux-gnu) uses its own multiarch
-          # sysroot for libc/libgcc. Passing our minimal sysroot breaks those lookups.
-          # Instead we use --extra-cflags/-ldflags to inject our lib/include paths.
+          # NOTE: No --sysroot. The Ubuntu cross-compiler uses its own multiarch
+          # sysroot for libc/libgcc; our minimal sysroot only has MPP/RGA/DRM.
+          # We inject our paths via --extra-cflags/-ldflags instead.
           ./configure \
             --prefix="$INSTALL_DIR" \
             --enable-cross-compile \
