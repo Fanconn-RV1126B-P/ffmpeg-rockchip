@@ -14,6 +14,8 @@ on:
         default: false
 
 env:
+  # Opt in early to Node.js 24 runtime for JavaScript actions
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   # Version of the sysroot asset stored as a GitHub Release
   # Run `scripts/package-sysroot.sh` locally and upload to a release tagged `sysroot-v1.1.0`
   SYSROOT_RELEASE_TAG: sysroot-v1.1.1

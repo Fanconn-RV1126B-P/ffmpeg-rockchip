@@ -47,7 +47,7 @@ echo -e "${GREEN}✓ FFmpeg found: $FFMPEG_BIN${NC}"
 echo -e "\n${YELLOW}[2/8] Checking MPP hardware codecs...${NC}"
 CODECS=$($FFMPEG_BIN -hide_banner -codecs 2>&1)
 MPP_DECODERS=$(echo "$CODECS" | grep _rkmpp || true)
-MPP_ENCODERS=$(echo "$CODECS" | grep _rkmpp_encoder || true)
+MPP_ENCODERS=$($FFMPEG_BIN -hide_banner -encoders 2>&1 | grep _rkmpp || true)
 
 if [ -z "$MPP_DECODERS" ]; then
     echo -e "${RED}✗ No MPP decoders found${NC}"
@@ -112,8 +112,8 @@ CPU_AFTER=$(grep 'cpu ' /proc/stat)
 END_TIME=$(date +%s.%N)
 DURATION=$(echo "$END_TIME - $START_TIME" | bc)
 
-# Extract FPS from log
-FPS=$(grep -oP 'speed=\s*\K[0-9.]+' /tmp/decode-test.log | tail -1)
+# Extract speed from log (BusyBox/GNU compatible)
+FPS=$(grep -oE 'speed=[0-9.]+x|speed=[0-9.]+\.[0-9]+x' /tmp/decode-test.log | tail -1 | sed -E 's/speed=([0-9.]+)x/\1/' || true)
 if [ -z "$FPS" ]; then
     FPS="N/A"
 fi
@@ -139,7 +139,7 @@ $FFMPEG_BIN -hide_banner \
 
 END_TIME=$(date +%s.%N)
 DURATION_SW=$(echo "$END_TIME - $START_TIME" | bc)
-FPS_SW=$(grep -oP 'speed=\s*\K[0-9.]+' /tmp/decode-sw-test.log | tail -1)
+FPS_SW=$(grep -oE 'speed=[0-9.]+x|speed=[0-9.]+\.[0-9]+x' /tmp/decode-sw-test.log | tail -1 | sed -E 's/speed=([0-9.]+)x/\1/' || true)
 if [ -z "$FPS_SW" ]; then
     FPS_SW="N/A"
 fi
@@ -177,7 +177,8 @@ if [ -n "$HAS_MPP_ENCODER" ]; then
     
     END_TIME=$(date +%s.%N)
     DURATION_ENC=$(echo "$END_TIME - $START_TIME" | bc)
-    FPS_ENC=$(grep -oP 'speed=\s*\K[0-9.]+' /tmp/encode-test.log | tail -1)
+    FPS_ENC=$(grep -oE 'speed=[0-9.]+x|speed=[0-9.]+\.[0-9]+x' /tmp/encode-test.log | tail -1 | sed -E 's/speed=([0-9.]+)x/\1/' || true)
+    [ -z "$FPS_ENC" ] && FPS_ENC="N/A"
     
     if [ -f "$OUTPUT_HW" ]; then
         SIZE_HW=$(du -h "$OUTPUT_HW" | cut -f1)
@@ -205,7 +206,8 @@ if [ -n "$HAS_MPP_ENCODER" ]; then
     
     END_TIME=$(date +%s.%N)
     DURATION_TC=$(echo "$END_TIME - $START_TIME" | bc)
-    FPS_TC=$(grep -oP 'speed=\s*\K[0-9.]+' /tmp/transcode-test.log | tail -1)
+    FPS_TC=$(grep -oE 'speed=[0-9.]+x|speed=[0-9.]+\.[0-9]+x' /tmp/transcode-test.log | tail -1 | sed -E 's/speed=([0-9.]+)x/\1/' || true)
+    [ -z "$FPS_TC" ] && FPS_TC="N/A"
     
     if [ -f "$OUTPUT_TRANSCODE" ]; then
         SIZE_TC=$(du -h "$OUTPUT_TRANSCODE" | cut -f1)
