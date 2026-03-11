@@ -1,3 +1,24 @@
+## RV1126B-P Status Summary (Initial)
+
+> ⚠️ **Disclaimer:** This is an initial integration commit for testing and validation only. It is not yet a finalized production release process.
+
+### What has been completed
+- Added GitHub Actions CI/CD workflow for RV1126B-P cross-compilation and artifact packaging.
+- Integrated RV1126B-P sysroot-based cross-build flow and cache strategy for repeatable builds.
+- Fixed CI/runtime issues found during bring-up (toolchain/sysroot compatibility and workflow stability).
+- Added and validated device-side test coverage for Rockchip MPP/RGA hardware acceleration.
+- Added host-driven installer script for release consumption:
+  - `scripts/install-ffmpeg-rv1126b.sh`
+  - supports host execution and remote install to target device over SSH/SCP.
+- Reorganized repository helper scripts into `scripts/` and test result documents into `rk1126b/`.
+- Updated release notes/assets and cleaned stale release artifacts.
+
+### Current testing scope
+- Target platform: RV1126B-P (Linux 6.1, aarch64).
+- Verification focus: FFmpeg binary integrity, RKMPP codec availability, and on-device hardware path validation.
+
+---
+
 ffmpeg-rockchip
 =============
 This project aims to provide full hardware transcoding pipeline in FFmpeg CLI for Rockchip platforms that support MPP ([Media Process Platform](https://github.com/rockchip-linux/mpp)) and RGA ([2D Raster Graphic Acceleration](https://github.com/airockchip/librga)). This includes hardware decoders, encoders and filters. A typical target platform is RK3588/3588s based devices.
