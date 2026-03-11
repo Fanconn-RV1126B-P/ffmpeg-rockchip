@@ -83,11 +83,11 @@ ASSET_BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
 
 # Get the filename from the release page HTML (look for the tarball pattern)
 ASSET_NAME=$(fetch_to_stdout "https://github.com/${REPO}/releases/expanded_assets/${TAG}" 2>/dev/null \
-    | grep -oE "ffmpeg-rv1126b-[0-9]+-[0-9]{8}-[a-f0-9]+\.tar\.gz" | head -1)
+    | grep -oE "ffmpeg-rv1126b-[0-9.]+-[0-9]{8}-[a-f0-9]+\.tar\.gz" | grep -v "\.sha256$" | head -1)
 
 if [ -z "$ASSET_NAME" ]; then
     ASSET_NAME=$(fetch_to_stdout "https://github.com/${REPO}/releases/tag/${TAG}" 2>/dev/null \
-        | grep -oE "ffmpeg-rv1126b-[0-9]+-[0-9]{8}-[a-f0-9]+\.tar\.gz" | head -1)
+        | grep -oE "ffmpeg-rv1126b-[0-9.]+-[0-9]{8}-[a-f0-9]+\.tar\.gz" | grep -v "\.sha256$" | head -1)
 fi
 
 [ -n "$ASSET_NAME" ] || error "Could not find release asset .tar.gz for tag $TAG"
