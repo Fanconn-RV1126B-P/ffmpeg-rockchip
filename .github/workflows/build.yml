@@ -16,12 +16,12 @@ on:
 env:
   # Version of the sysroot asset stored as a GitHub Release
   # Run `scripts/package-sysroot.sh` locally and upload to a release tagged `sysroot-v1.1.0`
-  SYSROOT_RELEASE_TAG: sysroot-v1.1.0
+  SYSROOT_RELEASE_TAG: sysroot-v1.1.1
   SYSROOT_ASSET_PATTERN: "rv1126b-sysroot-minimal-*.tar.gz"
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: write   # needed to create releases and upload assets
 
@@ -70,25 +70,44 @@ jobs:
       # ── Configure ───────────────────────────────────────────────────────────
       - name: Configure FFmpeg
         run: |
-          STAGING="$(pwd)/sysroot"
-          INSTALL_DIR="$(pwd)/install"
+          STAGING="$(realpath sysroot)"
+          INSTALL_DIR="$(realpath .)/install"
 
-          export PKG_CONFIG_PATH="$STAGING/usr/lib/pkgconfig"
-          export PKG_CONFIG_SYSROOT_DIR="$STAGING"
-          export PKG_CONFIG_LIBDIR="$STAGING/usr/lib/pkgconfig"
+          # Patch .pc files to embed the absolute staging path as prefix.
+          # This is the most reliable approach: pkg-config then emits
+          # -L${STAGING}/usr/lib and -I${STAGING}/usr/include directly,
+          # with no dependency on PKG_CONFIG_SYSROOT_DIR path rewriting.
+          echo "Patching pkg-config files with staging prefix: $STAGING"
+          for pc in sysroot/usr/lib/pkgconfig/*.pc; do
+            sed -i "s|^prefix=.*|prefix=${STAGING}/usr|" "$pc"
+          done
 
-          echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
-          pkg-config --list-all 2>/dev/null | grep -E "rockchip|rga|drm" || true
+          # Create a pkg-config wrapper that restricts to our sysroot only.
+          # PKG_CONFIG_DIR= clears the default search path so system .pc files
+          # (e.g. host libdrm) cannot interfere.
+          PKG_CONFIG_WRAPPER="$(pwd)/aarch64-pkg-config"
+          printf '#!/bin/sh\nexport PKG_CONFIG_DIR=\nexport PKG_CONFIG_LIBDIR="%s/usr/lib/pkgconfig"\nexec pkg-config "$@"\n' \
+            "$STAGING" > "$PKG_CONFIG_WRAPPER"
+          chmod +x "$PKG_CONFIG_WRAPPER"
 
-          ./configure \
+          echo "Checking pkg-config wrapper output:"
+          "$PKG_CONFIG_WRAPPER" --libs   libdrm && \
+          "$PKG_CONFIG_WRAPPER" --cflags libdrm && \
+          "$PKG_CONFIG_WRAPPER" --libs   rockchip_mpp && \
+          "$PKG_CONFIG_WRAPPER" --libs   librga
+
+          # NOTE: No --sysroot. The Ubuntu cross-compiler uses its own multiarch
+          # sysroot for libc/libgcc; our minimal sysroot only has MPP/RGA/DRM.
+          # We inject our paths via --extra-cflags/-ldflags instead.
+          if ! ./configure \
             --prefix="$INSTALL_DIR" \
             --enable-cross-compile \
             --cross-prefix=aarch64-linux-gnu- \
             --arch=aarch64 \
             --target-os=linux \
-            --sysroot="$STAGING" \
-            --extra-cflags="-I$STAGING/usr/include" \
-            --extra-ldflags="-L$STAGING/usr/lib -Wl,-rpath-link,$STAGING/usr/lib" \
+            --pkg-config="$PKG_CONFIG_WRAPPER" \
+            --extra-cflags="-I${STAGING}/usr/include" \
+              --extra-ldflags="-L${STAGING}/usr/lib -Wl,-rpath-link,${STAGING}/usr/lib -Wl,--allow-shlib-undefined" \
             --enable-gpl \
             --enable-version3 \
             --enable-libdrm \
@@ -98,7 +117,15 @@ jobs:
             --disable-htmlpages \
             --disable-manpages \
             --disable-podpages \
-            --disable-txtpages
+            --disable-txtpages; then
+            echo ""
+            echo "===== ffbuild/config.log (libdrm excerpt) ====="
+            grep -nE "libdrm|xf86drm|drmGetVersion|ERROR" ffbuild/config.log | head -200 || true
+            echo ""
+            echo "===== ffbuild/config.log (tail) ====="
+            tail -n 200 ffbuild/config.log || true
+            exit 1
+          fi
 
       # ── Build ────────────────────────────────────────────────────────────────
       - name: Build FFmpeg

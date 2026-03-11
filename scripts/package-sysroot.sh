@@ -14,10 +14,10 @@
 # The script will produce:
 #   rv1126b-sysroot-minimal-<version>.tar.gz
 #
-# Upload that tarball to a GitHub Release tagged `sysroot-v1.1.0`:
-#   gh release create sysroot-v1.1.0 \
-#     rv1126b-sysroot-minimal-v1.1.0.tar.gz \
-#     --title "RV1126B-P Sysroot v1.1.0" \
+# Upload that tarball to a GitHub Release tagged `sysroot-v1.1.1`:
+#   gh release create sysroot-v1.1.1 \
+#     rv1126b-sysroot-minimal-v1.1.1.tar.gz \
+#     --title "RV1126B-P Sysroot v1.1.1" \
 #     --notes "Minimal cross-compilation sysroot: MPP, RGA, DRM"
 #
 
@@ -38,7 +38,7 @@ SDK_ROOT="${SDK_ROOT:-$REPO_ROOT/../RV1126B-P-SDK/rv1126b_linux6.1_sdk_v1.1.0}"
 BUILDROOT_OUTPUT="$SDK_ROOT/buildroot/output/rockchip_rv1126b"
 STAGING="$BUILDROOT_OUTPUT/host/aarch64-buildroot-linux-gnu/sysroot"
 
-SYSROOT_VERSION="${SYSROOT_VERSION:-v1.1.0}"
+SYSROOT_VERSION="${SYSROOT_VERSION:-v1.1.1}"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT}"
 OUTPUT_NAME="rv1126b-sysroot-minimal-${SYSROOT_VERSION}.tar.gz"
 STAGING_AREA="/tmp/rv1126b-sysroot-pkg-$$"
@@ -90,19 +90,32 @@ copy_glob "$STAGING/usr/include/libdrm"      "$DEST/usr/include/libdrm"
 # Some SDKs put drm headers at /usr/include/drm
 copy_glob "$STAGING/usr/include/drm"         "$DEST/usr/include/drm"
 
+# FFmpeg's libdrm check requires top-level headers:
+#   xf86drm.h and xf86drmMode.h
+for hdr in xf86drm.h xf86drmMode.h; do
+    if [ -f "$STAGING/usr/include/$hdr" ]; then
+        cp -a "$STAGING/usr/include/$hdr" "$DEST/usr/include/"
+        echo -e "  ${GREEN}✓${NC} $STAGING/usr/include/$hdr"
+    else
+        echo -e "  ${YELLOW}⚠ Not found:${NC} $STAGING/usr/include/$hdr"
+    fi
+done
+
 echo ""
 echo -e "${BLUE}Collecting libraries...${NC}"
 
 copy_lib() {
     local pattern="$1"
     local found=0
-    for f in $STAGING/usr/lib/${pattern} 2>/dev/null; do
-        [ -e "$f" ] || continue
+    while IFS= read -r -d '' f; do
         cp -a "$f" "$DEST/usr/lib/"
         echo -e "  ${GREEN}✓${NC} $(basename "$f")"
         found=1
-    done
-    [ $found -eq 0 ] && echo -e "  ${YELLOW}⚠ Not found:${NC} $pattern"
+    done < <(find "$STAGING/usr/lib" -maxdepth 1 -name "$pattern" -print0 2>/dev/null)
+    if [ $found -eq 0 ]; then
+        echo -e "  ${YELLOW}⚠ Not found:${NC} $pattern"
+    fi
+    return 0
 }
 
 copy_lib "librockchip_mpp.so*"
@@ -120,12 +133,8 @@ copy_pc() {
         echo -e "  ${GREEN}✓${NC} ${name}.pc"
     else
         echo -e "  ${YELLOW}⚠ Not found:${NC} ${name}.pc"
-        # Generate a minimal .pc if the lib exists
-        if ls "$DEST/usr/lib/lib${name}.so"* >/dev/null 2>&1 || \
-           ls "$DEST/usr/lib/librockchip_mpp.so"* >/dev/null 2>&1; then
-            echo -e "  ${BLUE}→ Generating minimal ${name}.pc${NC}"
-        fi
     fi
+    return 0
 }
 
 copy_pc "rockchip_mpp"
