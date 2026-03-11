@@ -96,13 +96,15 @@ echo -e "${BLUE}Collecting libraries...${NC}"
 copy_lib() {
     local pattern="$1"
     local found=0
-    for f in $STAGING/usr/lib/${pattern} 2>/dev/null; do
-        [ -e "$f" ] || continue
+    while IFS= read -r -d '' f; do
         cp -a "$f" "$DEST/usr/lib/"
         echo -e "  ${GREEN}✓${NC} $(basename "$f")"
         found=1
-    done
-    [ $found -eq 0 ] && echo -e "  ${YELLOW}⚠ Not found:${NC} $pattern"
+    done < <(find "$STAGING/usr/lib" -maxdepth 1 -name "$pattern" -print0 2>/dev/null)
+    if [ $found -eq 0 ]; then
+        echo -e "  ${YELLOW}⚠ Not found:${NC} $pattern"
+    fi
+    return 0
 }
 
 copy_lib "librockchip_mpp.so*"
@@ -120,12 +122,8 @@ copy_pc() {
         echo -e "  ${GREEN}✓${NC} ${name}.pc"
     else
         echo -e "  ${YELLOW}⚠ Not found:${NC} ${name}.pc"
-        # Generate a minimal .pc if the lib exists
-        if ls "$DEST/usr/lib/lib${name}.so"* >/dev/null 2>&1 || \
-           ls "$DEST/usr/lib/librockchip_mpp.so"* >/dev/null 2>&1; then
-            echo -e "  ${BLUE}→ Generating minimal ${name}.pc${NC}"
-        fi
     fi
+    return 0
 }
 
 copy_pc "rockchip_mpp"
