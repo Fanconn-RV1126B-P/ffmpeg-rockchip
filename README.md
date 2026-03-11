@@ -17,6 +17,37 @@
 - Target platform: RV1126B-P (Linux 6.1, aarch64).
 - Verification focus: FFmpeg binary integrity, RKMPP codec availability, and on-device hardware path validation.
 
+### Installation (Host → Device)
+
+Run from host PC:
+
+```bash
+curl -fsSL https://github.com/Fanconn-RV1126B-P/ffmpeg-rockchip/releases/latest/download/install-ffmpeg-rv1126b.sh | sh -s -- <device_ip>
+```
+
+On the device, set executable permission and PATH:
+
+```bash
+chmod 755 /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/ffmpeg-test.sh
+export PATH=/usr/local/bin:$PATH
+hash -r
+```
+
+Optional: make PATH persistent after reboot:
+
+```bash
+echo 'export PATH=/usr/local/bin:$PATH' >> /etc/profile
+```
+
+Quick verification on device:
+
+```bash
+/usr/local/bin/ffmpeg -hide_banner -version
+ffmpeg -hide_banner -filters | grep -E 'scale_rkrga|vpp_rkrga|overlay_rkrga'
+ffmpeg -hide_banner -buildconf | grep -E 'rkrga|rkmpp'
+/usr/local/bin/ffmpeg-test.sh
+```
+
 ---
 
 ffmpeg-rockchip
