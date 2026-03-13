@@ -16,8 +16,6 @@ on:
         default: false
 
 env:
-  # Opt in early to Node.js 24 runtime for JavaScript actions
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   # Version of the sysroot asset stored as a GitHub Release
   # Run `scripts/package-sysroot.sh` locally and upload to a release tagged `sysroot-v1.1.1`
   SYSROOT_VERSION: v1.1.1
@@ -36,8 +34,6 @@ jobs:
           - name: rkmpp_software
             artifact_suffix: rkmpp-software
             configure_flags: "--enable-libx264 --enable-libx265 --enable-libvpx --enable-libaom"
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
       contents: write   # needed to create releases and upload assets
 
@@ -61,7 +57,7 @@ jobs:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repository
         if: steps.profile_guard.outputs.run == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0   # full history so `git describe` works
 
@@ -91,7 +87,7 @@ jobs:
       - name: Cache RV1126B-P minimal sysroot
         if: steps.profile_guard.outputs.run == 'true'
         id: cache-sysroot
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: sysroot
           key: rv1126b-sysroot-${{ env.SYSROOT_VERSION }}
@@ -536,7 +532,7 @@ jobs:
       # ── Upload workflow artifact ──────────────────────────────────────────────
       - name: Upload build artifact
         if: steps.profile_guard.outputs.run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ffmpeg-rv1126b-${{ matrix.profile.artifact_suffix }}-${{ env.FFMPEG_VERSION }}-${{ env.BUILD_DATE }}
           path: dist/*.tar.gz
