@@ -1,272 +1,256 @@
-#!/bin/bash
+#!/bin/sh
 #
-# FFmpeg-Rockchip Hardware Acceleration Test Script for RV1126B-P
-# Tests MPP hardware decode/encode without requiring a display
+# test-on-device.sh
+# FFmpeg-Rockchip hardware and software codec test suite for RV1126B-P
+# Run this directly on the device after installation.
 #
-# Usage: Run this script on the RV1126B-P device after extracting ffmpeg
+# Usage:
+#   sh /usr/local/ffmpeg-rv1126b/test-on-device.sh
+#   bash test-on-device.sh
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; NC='\033[0m'
 
-FFMPEG_BIN="/usr/local/bin/ffmpeg"
-TEST_DIR="/tmp/ffmpeg-test"
-RESULTS_FILE="/tmp/ffmpeg-test-results.txt"
+info()    { printf "${BLUE}[+]${NC} %s\n" "$*"; }
+success() { printf "${GREEN}[✓]${NC} %s\n" "$*"; }
+warn()    { printf "${YELLOW}[!]${NC} %s\n" "$*"; }
+error()   { printf "${RED}[✗]${NC} %s\n" "$*"; exit 1; }
+skip()    { printf "${YELLOW}[-]${NC} %s\n" "$*"; }
 
-# Header
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}FFmpeg-Rockchip Hardware Test${NC}"
-echo -e "${BLUE}RV1126B-P - No Display Required${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
+TEST_DIR="/tmp/ffmpeg-rv1126b-test"
+RESULTS_FILE="/tmp/ffmpeg-rv1126b-test-results.txt"
+PASS=0; FAIL=0; SKIP=0
 
-# Initialize results file
-echo "FFmpeg-Rockchip Hardware Acceleration Test Results" > "$RESULTS_FILE"
-echo "Date: $(date)" >> "$RESULTS_FILE"
-echo "Device: RV1126B-P" >> "$RESULTS_FILE"
-echo "========================================" >> "$RESULTS_FILE"
-echo "" >> "$RESULTS_FILE"
+result_pass() { PASS=$((PASS+1)); success "$1"; echo "PASS: $1" >> "$RESULTS_FILE"; }
+result_fail() { FAIL=$((FAIL+1)); error  "$1"; echo "FAIL: $1" >> "$RESULTS_FILE"; }
+result_skip() { SKIP=$((SKIP+1)); skip   "$1"; echo "SKIP: $1" >> "$RESULTS_FILE"; }
 
-# Check FFmpeg installation
-echo -e "${YELLOW}[1/8] Checking FFmpeg installation...${NC}"
-if [ ! -f "$FFMPEG_BIN" ]; then
-    echo -e "${RED}✗ FFmpeg not found at $FFMPEG_BIN${NC}"
-    echo "Please extract the tarball first:"
-    echo "  cd /tmp"
-    echo "  tar xzf ffmpeg-rv1126b-20260121.tar.gz -C /usr/local"
-    exit 1
-fi
-echo -e "${GREEN}✓ FFmpeg found: $FFMPEG_BIN${NC}"
+# ── Auto-detect ffmpeg binary ─────────────────────────────────────────
+find_ffmpeg() {
+    for candidate in \
+        /usr/local/ffmpeg-rv1126b/bin/ffmpeg-rv1126b \
+        /usr/local/ffmpeg-rv1126b/bin/ffmpeg \
+        /usr/local/bin/ffmpeg \
+        /usr/bin/ffmpeg \
+        ffmpeg
+    do
+        if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
 
-# Verify MPP codecs available
-echo -e "\n${YELLOW}[2/8] Checking MPP hardware codecs...${NC}"
-CODECS=$($FFMPEG_BIN -hide_banner -codecs 2>&1)
-MPP_DECODERS=$(echo "$CODECS" | grep _rkmpp || true)
-MPP_ENCODERS=$($FFMPEG_BIN -hide_banner -encoders 2>&1 | grep _rkmpp || true)
+FFMPEG=$(find_ffmpeg) || error "ffmpeg not found. Run install-ffmpeg-rv1126b.sh first."
+FFPROBE=$(dirname "$FFMPEG")/ffprobe
+[ -x "$FFPROBE" ] || FFPROBE=$(dirname "$FFMPEG")/ffprobe-rv1126b
+[ -x "$FFPROBE" ] || FFPROBE=""
 
-if [ -z "$MPP_DECODERS" ]; then
-    echo -e "${RED}✗ No MPP decoders found${NC}"
-    exit 1
-fi
-echo -e "${GREEN}✓ MPP Decoders available:${NC}"
-echo "$MPP_DECODERS" | while read line; do echo "  $line"; done
+printf "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+printf "${BLUE}  FFmpeg-Rockchip Test Suite — RV1126B-P${NC}\n"
+printf "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+info "FFmpeg binary : $FFMPEG"
+info "Test dir      : $TEST_DIR"
+printf "\n"
 
-if [ -z "$MPP_ENCODERS" ]; then
-    echo -e "${YELLOW}⚠ No MPP encoders found (may not be compiled)${NC}"
-else
-    echo -e "${GREEN}✓ MPP Encoders available:${NC}"
-    echo "$MPP_ENCODERS" | while read line; do echo "  $line"; done
-fi
-
-# Create test directory
 mkdir -p "$TEST_DIR"
-cd "$TEST_DIR"
+: > "$RESULTS_FILE"
+printf "FFmpeg-Rockchip Test Results — $(date)\n" >> "$RESULTS_FILE"
+printf "Binary: %s\n" "$FFMPEG" >> "$RESULTS_FILE"
+printf "======================================\n\n" >> "$RESULTS_FILE"
 
-# Generate test video using hardware encoding (or copy from RTSP)
-echo -e "\n${YELLOW}[3/8] Generating test video (H.264)...${NC}"
-TEST_VIDEO="$TEST_DIR/test-h264.mp4"
-
-# Try hardware encoder first, fallback to mpeg4
-if $FFMPEG_BIN -hide_banner -encoders 2>&1 | grep -q h264_rkmpp; then
-    $FFMPEG_BIN -hide_banner -loglevel error \
-        -f lavfi -i testsrc=duration=10:size=1920x1080:rate=25 \
-        -c:v h264_rkmpp -b:v 2M \
-        -y "$TEST_VIDEO" 2>&1
+# ── [1] Version check ─────────────────────────────────────────────────
+printf "${YELLOW}[1] FFmpeg version${NC}\n"
+if "$FFMPEG" -version 2>&1 | head -1 | grep -q ffmpeg; then
+    "$FFMPEG" -version 2>&1 | head -1
+    result_pass "ffmpeg version check"
 else
-    # Use mpeg4 as fallback (no preset option needed)
-    $FFMPEG_BIN -hide_banner -loglevel error \
-        -f lavfi -i testsrc=duration=10:size=1920x1080:rate=25 \
-        -c:v mpeg4 -b:v 2M \
-        -y "$TEST_VIDEO" 2>&1
+    result_fail "ffmpeg version check"
 fi
 
-if [ -f "$TEST_VIDEO" ]; then
-    SIZE=$(du -h "$TEST_VIDEO" | cut -f1)
-    echo -e "${GREEN}✓ Test video created: $SIZE${NC}"
-    echo "Test video: $TEST_VIDEO ($SIZE)" >> "$RESULTS_FILE"
+# ── [2] Hardware device nodes ─────────────────────────────────────────
+printf "\n${YELLOW}[2] Rockchip device nodes${NC}\n"
+for dev in /dev/mpp_service /dev/rga; do
+    if [ -e "$dev" ]; then
+        result_pass "Device node: $dev"
+    else
+        warn "Device node not found: $dev (hardware tests may fail)"
+        echo "WARN: $dev not found" >> "$RESULTS_FILE"
+    fi
+done
+
+# ── [3] MPP hardware codecs ───────────────────────────────────────────
+printf "\n${YELLOW}[3] MPP hardware codecs${NC}\n"
+HW_DECODERS=$("$FFMPEG" -hide_banner -decoders 2>&1 | grep _rkmpp | awk '{print $2}' | tr '\n' ' ')
+HW_ENCODERS=$("$FFMPEG" -hide_banner -encoders 2>&1 | grep _rkmpp | awk '{print $2}' | tr '\n' ' ')
+RGA_FILTERS=$("$FFMPEG" -hide_banner -filters 2>&1 | grep rkrga | awk '{print $2}' | tr '\n' ' ')
+
+if [ -n "$HW_DECODERS" ]; then
+    result_pass "MPP decoders: $HW_DECODERS"
 else
-    echo -e "${RED}✗ Failed to create test video${NC}"
+    result_fail "No MPP decoders found"
+fi
+if [ -n "$HW_ENCODERS" ]; then
+    result_pass "MPP encoders: $HW_ENCODERS"
+else
+    warn "No MPP encoders (encode tests will be skipped)"
+fi
+if [ -n "$RGA_FILTERS" ]; then
+    result_pass "RGA filters: $RGA_FILTERS"
+else
+    warn "No RGA filters found"
+fi
+
+# ── [4] Generate test source video (software) ─────────────────────────
+printf "\n${YELLOW}[4] Generate test source video${NC}\n"
+TEST_SRC="$TEST_DIR/source.mp4"
+"$FFMPEG" -hide_banner -loglevel error -y \
+    -f lavfi -i "testsrc=duration=5:size=1280x720:rate=25" \
+    -c:v libx264 -b:v 1M \
+    "$TEST_SRC" 2>/dev/null || \
+"$FFMPEG" -hide_banner -loglevel error -y \
+    -f lavfi -i "testsrc=duration=5:size=1280x720:rate=25" \
+    -c:v mpeg4 -b:v 1M \
+    "$TEST_SRC" 2>/dev/null || true
+
+if [ -f "$TEST_SRC" ]; then
+    SIZE=$(du -h "$TEST_SRC" | cut -f1)
+    result_pass "Test source video: $SIZE"
+else
+    warn "Could not generate test source; some tests will be skipped"
+fi
+
+# ── [5] MPP hardware decode ───────────────────────────────────────────
+printf "\n${YELLOW}[5] MPP H.264 hardware decode (h264_rkmpp)${NC}\n"
+if echo "$HW_DECODERS" | grep -q h264_rkmpp && [ -f "$TEST_SRC" ]; then
+    LOG="$TEST_DIR/hw-decode.log"
+    "$FFMPEG" -hide_banner -loglevel info \
+        -c:v h264_rkmpp -i "$TEST_SRC" -f null - 2>"$LOG" || true
+    SPEED=$(grep -oE 'speed=[0-9.]+x' "$LOG" | tail -1 | sed 's/speed=//')
+    if grep -q "Output #0" "$LOG" || grep -q "frame=" "$LOG"; then
+        result_pass "MPP H.264 decode — speed: ${SPEED:-N/A}"
+    else
+        result_fail "MPP H.264 decode failed (check $LOG)"
+    fi
+else
+    result_skip "MPP H.264 decode (no h264_rkmpp decoder or no test source)"
+fi
+
+# ── [6] MPP hardware encode ───────────────────────────────────────────
+printf "\n${YELLOW}[6] MPP H.264 hardware encode (h264_rkmpp)${NC}\n"
+if echo "$HW_ENCODERS" | grep -q h264_rkmpp; then
+    OUT_HW="$TEST_DIR/hw-encode.mp4"
+    LOG="$TEST_DIR/hw-encode.log"
+    "$FFMPEG" -hide_banner -loglevel info -y \
+        -f lavfi -i "testsrc=duration=5:size=1280x720:rate=25" \
+        -c:v h264_rkmpp -b:v 2M \
+        "$OUT_HW" 2>"$LOG" || true
+    if [ -f "$OUT_HW" ] && [ -s "$OUT_HW" ]; then
+        SPEED=$(grep -oE 'speed=[0-9.]+x' "$LOG" | tail -1 | sed 's/speed=//')
+        SIZE=$(du -h "$OUT_HW" | cut -f1)
+        result_pass "MPP H.264 encode — speed: ${SPEED:-N/A}, size: $SIZE"
+    else
+        result_fail "MPP H.264 encode failed (check $LOG)"
+    fi
+else
+    result_skip "MPP H.264 encode (no h264_rkmpp encoder)"
+fi
+
+# ── [7] MPP hardware transcode ────────────────────────────────────────
+printf "\n${YELLOW}[7] MPP hardware transcode (h264_rkmpp → h264_rkmpp)${NC}\n"
+if echo "$HW_DECODERS" | grep -q h264_rkmpp && \
+   echo "$HW_ENCODERS" | grep -q h264_rkmpp && [ -f "$TEST_SRC" ]; then
+    OUT_TC="$TEST_DIR/transcode.mp4"
+    LOG="$TEST_DIR/transcode.log"
+    "$FFMPEG" -hide_banner -loglevel info -y \
+        -c:v h264_rkmpp -i "$TEST_SRC" \
+        -c:v h264_rkmpp -b:v 1M \
+        "$OUT_TC" 2>"$LOG" || true
+    if [ -f "$OUT_TC" ] && [ -s "$OUT_TC" ]; then
+        SPEED=$(grep -oE 'speed=[0-9.]+x' "$LOG" | tail -1 | sed 's/speed=//')
+        result_pass "MPP transcode pipeline — speed: ${SPEED:-N/A}"
+    else
+        result_fail "MPP transcode failed (check $LOG)"
+    fi
+else
+    result_skip "MPP transcode (missing rkmpp encoder/decoder)"
+fi
+
+# ── [8] Software codecs (rkmpp-sw profile) ───────────────────────────
+printf "\n${YELLOW}[8] Software codecs (rkmpp-sw profile)${NC}\n"
+SW_ENCODERS=$("$FFMPEG" -hide_banner -encoders 2>&1)
+SW_DECODERS=$("$FFMPEG" -hide_banner -decoders 2>&1)
+
+for codec in libx264 libx265; do
+    if echo "$SW_ENCODERS" | grep -q "$codec"; then
+        OUT_SW="$TEST_DIR/sw-${codec}.mp4"
+        LOG="$TEST_DIR/sw-${codec}.log"
+        "$FFMPEG" -hide_banner -loglevel warning -y \
+            -f lavfi -i "testsrc=duration=3:size=640x360:rate=25" \
+            -c:v "$codec" -b:v 500k \
+            "$OUT_SW" 2>"$LOG" || true
+        if [ -f "$OUT_SW" ] && [ -s "$OUT_SW" ]; then
+            SIZE=$(du -h "$OUT_SW" | cut -f1)
+            result_pass "Software encode: $codec ($SIZE)"
+        else
+            result_fail "Software encode: $codec (check $LOG)"
+        fi
+    else
+        result_skip "Software encode: $codec (not compiled)"
+    fi
+done
+
+for codec in libvpx libvpx-vp9; do
+    if echo "$SW_ENCODERS" | grep -q "$codec"; then
+        OUT_SW="$TEST_DIR/sw-${codec}.webm"
+        LOG="$TEST_DIR/sw-${codec}.log"
+        "$FFMPEG" -hide_banner -loglevel warning -y \
+            -f lavfi -i "testsrc=duration=3:size=640x360:rate=25" \
+            -c:v "$codec" -b:v 500k \
+            "$OUT_SW" 2>"$LOG" || true
+        if [ -f "$OUT_SW" ] && [ -s "$OUT_SW" ]; then
+            SIZE=$(du -h "$OUT_SW" | cut -f1)
+            result_pass "Software encode: $codec ($SIZE)"
+        else
+            result_fail "Software encode: $codec (check $LOG)"
+        fi
+    else
+        result_skip "Software encode: $codec (not compiled)"
+    fi
+done
+
+# libaom-av1 is very slow — just check it's present
+if echo "$SW_ENCODERS" | grep -q "libaom-av1"; then
+    result_pass "Software codec available: libaom-av1"
+else
+    result_skip "Software codec: libaom-av1 (not compiled)"
+fi
+
+# ── [9] System resources ──────────────────────────────────────────────
+printf "\n${YELLOW}[9] System resources${NC}\n"
+info "Memory:"
+free -h 2>/dev/null || cat /proc/meminfo | grep -E 'MemTotal|MemFree|MemAvailable' || true
+info "Load:"
+cat /proc/loadavg 2>/dev/null || true
+result_pass "System resource check"
+
+# ── Summary ───────────────────────────────────────────────────────────
+printf "\n${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+printf "${BLUE}  Test Summary${NC}\n"
+printf "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+printf "  ${GREEN}Passed: %d${NC}  ${RED}Failed: %d${NC}  ${YELLOW}Skipped: %d${NC}\n" "$PASS" "$FAIL" "$SKIP"
+printf "  Results: %s\n" "$RESULTS_FILE"
+printf "  Test files: %s\n" "$TEST_DIR"
+printf "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+
+printf "SUMMARY: PASS=%d FAIL=%d SKIP=%d\n" "$PASS" "$FAIL" "$SKIP" >> "$RESULTS_FILE"
+
+if [ "$FAIL" -gt 0 ]; then
+    printf "${RED}Some tests failed. Check logs in %s${NC}\n\n" "$TEST_DIR"
     exit 1
-fi
-
-# Test 1: MPP Hardware Decode (H.264 -> null)
-echo -e "\n${YELLOW}[4/8] Testing MPP H.264 hardware decode...${NC}"
-echo "" >> "$RESULTS_FILE"
-echo "Test 1: MPP H.264 Hardware Decode" >> "$RESULTS_FILE"
-echo "-----------------------------------" >> "$RESULTS_FILE"
-
-START_TIME=$(date +%s.%N)
-CPU_BEFORE=$(grep 'cpu ' /proc/stat)
-
-$FFMPEG_BIN -hide_banner \
-    -c:v h264_rkmpp \
-    -i "$TEST_VIDEO" \
-    -f null - 2>&1 | tee /tmp/decode-test.log
-
-CPU_AFTER=$(grep 'cpu ' /proc/stat)
-END_TIME=$(date +%s.%N)
-DURATION=$(echo "$END_TIME - $START_TIME" | bc)
-
-# Extract speed from log (BusyBox/GNU compatible)
-FPS=$(grep -oE 'speed=[0-9.]+x|speed=[0-9.]+\.[0-9]+x' /tmp/decode-test.log | tail -1 | sed -E 's/speed=([0-9.]+)x/\1/' || true)
-if [ -z "$FPS" ]; then
-    FPS="N/A"
-fi
-
-echo -e "${GREEN}✓ Hardware decode test completed${NC}"
-echo "  Duration: ${DURATION}s"
-echo "  Speed: ${FPS}x realtime"
-echo "Duration: ${DURATION}s" >> "$RESULTS_FILE"
-echo "Speed: ${FPS}x realtime" >> "$RESULTS_FILE"
-
-# Test 2: Software Decode Comparison
-echo -e "\n${YELLOW}[5/8] Testing software decode (for comparison)...${NC}"
-echo "" >> "$RESULTS_FILE"
-echo "Test 2: Software H.264 Decode (Comparison)" >> "$RESULTS_FILE"
-echo "-----------------------------------" >> "$RESULTS_FILE"
-
-START_TIME=$(date +%s.%N)
-
-$FFMPEG_BIN -hide_banner \
-    -c:v h264 \
-    -i "$TEST_VIDEO" \
-    -f null - 2>&1 | tee /tmp/decode-sw-test.log
-
-END_TIME=$(date +%s.%N)
-DURATION_SW=$(echo "$END_TIME - $START_TIME" | bc)
-FPS_SW=$(grep -oE 'speed=[0-9.]+x|speed=[0-9.]+\.[0-9]+x' /tmp/decode-sw-test.log | tail -1 | sed -E 's/speed=([0-9.]+)x/\1/' || true)
-if [ -z "$FPS_SW" ]; then
-    FPS_SW="N/A"
-fi
-
-echo -e "${GREEN}✓ Software decode test completed${NC}"
-echo "  Duration: ${DURATION_SW}s"
-echo "  Speed: ${FPS_SW}x realtime"
-echo "Duration: ${DURATION_SW}s" >> "$RESULTS_FILE"
-echo "Speed: ${FPS_SW}x realtime" >> "$RESULTS_FILE"
-
-# Calculate speedup
-if [ "$FPS" != "N/A" ] && [ "$FPS_SW" != "N/A" ]; then
-    SPEEDUP=$(echo "scale=2; $FPS / $FPS_SW" | bc)
-    echo -e "${BLUE}  → Hardware is ${SPEEDUP}x faster than software${NC}"
-    echo "Hardware speedup: ${SPEEDUP}x" >> "$RESULTS_FILE"
-fi
-
-# Test 3: Check if MPP encoders are available
-HAS_MPP_ENCODER=$($FFMPEG_BIN -hide_banner -encoders 2>&1 | grep "h264_rkmpp" || true)
-
-if [ -n "$HAS_MPP_ENCODER" ]; then
-    # Test 3: MPP Hardware Encode
-    echo -e "\n${YELLOW}[6/8] Testing MPP H.264 hardware encode...${NC}"
-    echo "" >> "$RESULTS_FILE"
-    echo "Test 3: MPP H.264 Hardware Encode" >> "$RESULTS_FILE"
-    echo "-----------------------------------" >> "$RESULTS_FILE"
-    
-    OUTPUT_HW="$TEST_DIR/encoded-hw.mp4"
-    START_TIME=$(date +%s.%N)
-    
-    $FFMPEG_BIN -hide_banner \
-        -f lavfi -i testsrc=duration=10:size=1920x1080:rate=25 \
-        -c:v h264_rkmpp -b:v 4M \
-        -y "$OUTPUT_HW" 2>&1 | tee /tmp/encode-test.log
-    
-    END_TIME=$(date +%s.%N)
-    DURATION_ENC=$(echo "$END_TIME - $START_TIME" | bc)
-    FPS_ENC=$(grep -oE 'speed=[0-9.]+x|speed=[0-9.]+\.[0-9]+x' /tmp/encode-test.log | tail -1 | sed -E 's/speed=([0-9.]+)x/\1/' || true)
-    [ -z "$FPS_ENC" ] && FPS_ENC="N/A"
-    
-    if [ -f "$OUTPUT_HW" ]; then
-        SIZE_HW=$(du -h "$OUTPUT_HW" | cut -f1)
-        echo -e "${GREEN}✓ Hardware encode completed: $SIZE_HW${NC}"
-        echo "  Duration: ${DURATION_ENC}s"
-        echo "  Speed: ${FPS_ENC}x realtime"
-        echo "Output size: $SIZE_HW" >> "$RESULTS_FILE"
-        echo "Duration: ${DURATION_ENC}s" >> "$RESULTS_FILE"
-        echo "Speed: ${FPS_ENC}x realtime" >> "$RESULTS_FILE"
-    fi
-    
-    # Test 4: Transcode (MPP decode + MPP encode)
-    echo -e "\n${YELLOW}[7/8] Testing hardware transcode (decode+encode)...${NC}"
-    echo "" >> "$RESULTS_FILE"
-    echo "Test 4: Hardware Transcode Pipeline" >> "$RESULTS_FILE"
-    echo "-----------------------------------" >> "$RESULTS_FILE"
-    
-    OUTPUT_TRANSCODE="$TEST_DIR/transcoded.mp4"
-    START_TIME=$(date +%s.%N)
-    
-    $FFMPEG_BIN -hide_banner \
-        -c:v h264_rkmpp -i "$TEST_VIDEO" \
-        -c:v h264_rkmpp -b:v 2M \
-        -y "$OUTPUT_TRANSCODE" 2>&1 | tee /tmp/transcode-test.log
-    
-    END_TIME=$(date +%s.%N)
-    DURATION_TC=$(echo "$END_TIME - $START_TIME" | bc)
-    FPS_TC=$(grep -oE 'speed=[0-9.]+x|speed=[0-9.]+\.[0-9]+x' /tmp/transcode-test.log | tail -1 | sed -E 's/speed=([0-9.]+)x/\1/' || true)
-    [ -z "$FPS_TC" ] && FPS_TC="N/A"
-    
-    if [ -f "$OUTPUT_TRANSCODE" ]; then
-        SIZE_TC=$(du -h "$OUTPUT_TRANSCODE" | cut -f1)
-        echo -e "${GREEN}✓ Transcode completed: $SIZE_TC${NC}"
-        echo "  Duration: ${DURATION_TC}s"
-        echo "  Speed: ${FPS_TC}x realtime"
-        echo "Output size: $SIZE_TC" >> "$RESULTS_FILE"
-        echo "Duration: ${DURATION_TC}s" >> "$RESULTS_FILE"
-        echo "Speed: ${FPS_TC}x realtime" >> "$RESULTS_FILE"
-    fi
 else
-    echo -e "\n${YELLOW}[6/8] Skipping encoder tests (MPP encoders not available)${NC}"
-    echo "" >> "$RESULTS_FILE"
-    echo "MPP Encoders: Not available in this build" >> "$RESULTS_FILE"
+    printf "${GREEN}All tests passed!${NC}\n\n"
 fi
-
-# Test 5: Memory usage check
-echo -e "\n${YELLOW}[8/8] System resource check...${NC}"
-echo "" >> "$RESULTS_FILE"
-echo "System Resources" >> "$RESULTS_FILE"
-echo "-----------------------------------" >> "$RESULTS_FILE"
-
-echo -e "${BLUE}Memory Usage:${NC}"
-free -h | tee -a "$RESULTS_FILE"
-
-echo -e "\n${BLUE}CPU Info:${NC}"
-cat /proc/cpuinfo | grep -E "(processor|model name|cpu MHz)" | head -4 | tee -a "$RESULTS_FILE"
-
-echo -e "\n${BLUE}MPP Device:${NC}"
-ls -la /dev/mpp* 2>&1 | tee -a "$RESULTS_FILE"
-
-echo -e "\n${BLUE}RGA Device:${NC}"
-ls -la /dev/rga 2>&1 | tee -a "$RESULTS_FILE"
-
-# Summary
-echo -e "\n${BLUE}========================================${NC}"
-echo -e "${BLUE}Test Summary${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo "" >> "$RESULTS_FILE"
-echo "Summary" >> "$RESULTS_FILE"
-echo "========================================" >> "$RESULTS_FILE"
-
-echo -e "${GREEN}✓ All tests completed successfully${NC}"
-echo -e "\nTest files created in: ${TEST_DIR}"
-echo -e "Detailed results saved to: ${RESULTS_FILE}"
-echo "" | tee -a "$RESULTS_FILE"
-echo "Test files location: $TEST_DIR" >> "$RESULTS_FILE"
-echo "All tests completed successfully" >> "$RESULTS_FILE"
-
-# Show results file
-echo -e "\n${YELLOW}Displaying full results:${NC}"
-cat "$RESULTS_FILE"
-
-echo -e "\n${BLUE}========================================${NC}"
-echo -e "${BLUE}Next Steps:${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo "1. Review results: cat $RESULTS_FILE"
-echo "2. Test with RTSP stream (adjust IP/port as needed):"
-echo "   $FFMPEG_BIN -c:v h264_rkmpp -rtsp_transport tcp -i rtsp://<CAMERA_IP>:554/live/0 -f null -"
-echo "3. Encode from camera to file:"
-echo "   $FFMPEG_BIN -c:v h264_rkmpp -rtsp_transport tcp -i rtsp://<CAMERA_IP>:554/live/0 -t 30 -c:v copy /tmp/recording.mp4"
-echo ""
