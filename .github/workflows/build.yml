@@ -35,7 +35,7 @@ jobs:
             configure_flags: ""
           - name: rkmpp_software
             artifact_suffix: rkmpp-software
-            configure_flags: "--enable-libx264"
+            configure_flags: "--enable-libx264 --enable-libx265 --enable-libvpx --enable-libaom"
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
@@ -53,9 +53,7 @@ jobs:
               RUN=true
             fi
           else
-            if [[ "${{ matrix.profile.name }}" == "rkmpp" ]]; then
-              RUN=true
-            fi
+            RUN=true
           fi
           echo "run=$RUN" >> "$GITHUB_OUTPUT"
           echo "Profile=${{ matrix.profile.name }} Ref=${GITHUB_REF_NAME} Run=$RUN"
@@ -83,6 +81,9 @@ jobs:
             autoconf \
             automake \
             libtool \
+            cmake \
+            ninja-build \
+            perl \
             yasm
           aarch64-linux-gnu-gcc --version
 
@@ -125,6 +126,161 @@ jobs:
           make -j"$(nproc)"
           make install
 
+      - name: Build x265 for software profile
+        if: steps.profile_guard.outputs.run == 'true' && matrix.profile.name == 'rkmpp_software'
+        run: |
+          STAGING="$(realpath sysroot)"
+          git clone --depth=1 https://bitbucket.org/multicoreware/x265_git.git /tmp/x265
+          cmake -S /tmp/x265/source -B /tmp/x265/build \
+            -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            -DCMAKE_FIND_ROOT_PATH="${STAGING}" \
+            -DCMAKE_INSTALL_PREFIX="${STAGING}/usr" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_SHARED=ON \
+            -DENABLE_STATIC=OFF \
+            -DENABLE_CLI=OFF \
+            -DENABLE_ASSEMBLY=OFF
+          cmake --build /tmp/x265/build -j"$(nproc)"
+          cmake --install /tmp/x265/build
+
+          # Some x265 CMake revisions build shared libx265 but only install the
+          # static archive. If that happens, stage the shared objects manually
+          # from the build directory so -lx265 can resolve dynamically.
+          if ! ls -1 "${STAGING}/usr/lib"/libx265.so* "${STAGING}/usr/lib64"/libx265.so* >/dev/null 2>&1; then
+            if ls -1 /tmp/x265/build/libx265.so* >/dev/null 2>&1; then
+              cp -a /tmp/x265/build/libx265.so* "${STAGING}/usr/lib/"
+            fi
+          fi
+
+          # Discover installed x265 libdir robustly.
+          X265_LIBDIR=""
+          for d in "${STAGING}/usr/lib" "${STAGING}/usr/lib64"; do
+            if ls -1 "${d}/libx265"* >/dev/null 2>&1; then
+              X265_LIBDIR="$d"
+              break
+            fi
+          done
+          if [ -z "$X265_LIBDIR" ]; then
+            echo "ERROR: x265 install completed but no libx265 artifact found in ${STAGING}/usr/lib or ${STAGING}/usr/lib64"
+            echo "=== ${STAGING}/usr/lib ==="
+            ls -la "${STAGING}/usr/lib" || true
+            echo "=== ${STAGING}/usr/lib64 ==="
+            ls -la "${STAGING}/usr/lib64" || true
+            exit 1
+          fi
+
+          X265_SHARED_PRESENT=0
+          if ls -1 "${X265_LIBDIR}/libx265.so"* >/dev/null 2>&1; then
+            X265_SHARED_PRESENT=1
+            if [ ! -e "${X265_LIBDIR}/libx265.so" ]; then
+              X265_SOVER="$(ls -1 "${X265_LIBDIR}"/libx265.so.* | sort -V | tail -n 1)"
+              ln -sf "$(basename "$X265_SOVER")" "${X265_LIBDIR}/libx265.so"
+            fi
+            rm -f "${X265_LIBDIR}/libx265.a" "${X265_LIBDIR}/libx265.la"
+          fi
+
+          # Always overwrite x265.pc.  x265 is a C++ library so -lstdc++ and -lm
+          # must appear in Libs: (not Libs.private) because FFmpeg's configure
+          # runs "pkg-config --libs x265" for the link test — Libs.private is
+          # only emitted by "pkg-config --libs --static".
+          X265_LIBDIR_NAME="$(basename "$X265_LIBDIR")"
+          mkdir -p "${X265_LIBDIR}/pkgconfig"
+          printf '%s\n' \
+            "prefix=${STAGING}/usr" \
+            'exec_prefix=${prefix}' \
+            "libdir=\${exec_prefix}/${X265_LIBDIR_NAME}" \
+            'includedir=${prefix}/include' \
+            '' \
+            'Name: x265' \
+            'Description: H.265/HEVC video encoder' \
+            'Version: 3.5' \
+            'Libs: -L${libdir} -lx265 -lstdc++ -lm' \
+            'Cflags: -I${includedir}' \
+            > "${X265_LIBDIR}/pkgconfig/x265.pc"
+
+          cat > /tmp/x265-link-test.c <<'EOF'
+          #include <x265.h>
+          int main(void) {
+            const x265_api *api = x265_api_get(0);
+            return api ? 0 : 1;
+          }
+          EOF
+          echo "=== x265 linker sanity test (${X265_LIBDIR}) ==="
+          export PKG_CONFIG_DIR=
+          export PKG_CONFIG_LIBDIR="${X265_LIBDIR}/pkgconfig"
+          if ! aarch64-linux-gnu-gcc /tmp/x265-link-test.c -o /tmp/x265-link-test \
+            $(pkg-config --cflags --libs x265) \
+            -Wl,-rpath-link,"${X265_LIBDIR}"; then
+            echo "ERROR: x265 linker sanity test failed (-lx265 unresolved)"
+            echo "=== ${X265_LIBDIR} contents ==="
+            ls -la "${X265_LIBDIR}" || true
+            exit 1
+          fi
+
+          echo "=== x265.pc ==="
+          cat "${X265_LIBDIR}/pkgconfig/x265.pc"
+          echo "=== x265 installed libs ==="
+          ls -la "${X265_LIBDIR}/libx265"* || true
+          file -L "${X265_LIBDIR}/libx265.so" 2>/dev/null || file "${X265_LIBDIR}/libx265"*.so* 2>/dev/null || true
+
+      - name: Build libvpx for software profile
+        if: steps.profile_guard.outputs.run == 'true' && matrix.profile.name == 'rkmpp_software'
+        run: |
+          STAGING="$(realpath sysroot)"
+          git clone --depth=1 https://chromium.googlesource.com/webm/libvpx /tmp/libvpx
+          cd /tmp/libvpx
+          export CROSS=aarch64-linux-gnu-
+          export CC="${CROSS}gcc"
+          export CXX="${CROSS}g++"
+          export AR="${CROSS}ar"
+          export AS="${CROSS}as"
+          export LD="${CROSS}ld"
+          export STRIP="${CROSS}strip"
+          ./configure \
+            --target=arm64-linux-gcc \
+            --prefix="${STAGING}/usr" \
+            --enable-shared \
+            --disable-static \
+            --disable-examples \
+            --disable-tools \
+            --disable-docs \
+            --disable-unit-tests \
+            --disable-runtime-cpu-detect
+          make -j"$(nproc)"
+          make install
+          file -L "${STAGING}/usr/lib/libvpx.so" | grep -q 'ARM aarch64' || {
+            echo "ERROR: libvpx was not cross-compiled for aarch64"
+            file -L "${STAGING}/usr/lib/libvpx.so" || true
+            exit 1
+          }
+
+      - name: Build libaom for software profile
+        if: steps.profile_guard.outputs.run == 'true' && matrix.profile.name == 'rkmpp_software'
+        run: |
+          STAGING="$(realpath sysroot)"
+          git clone --depth=1 https://aomedia.googlesource.com/aom /tmp/aom
+          cmake -S /tmp/aom -B /tmp/aom/build \
+            -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            -DCMAKE_FIND_ROOT_PATH="${STAGING}" \
+            -DCMAKE_INSTALL_PREFIX="${STAGING}/usr" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DENABLE_TESTS=0 \
+            -DENABLE_TOOLS=0 \
+            -DENABLE_DOCS=0 \
+            -DENABLE_EXAMPLES=0
+          cmake --build /tmp/aom/build -j"$(nproc)"
+          cmake --install /tmp/aom/build
+
       # ── Configure ───────────────────────────────────────────────────────────
       - name: Configure FFmpeg
         if: steps.profile_guard.outputs.run == 'true'
@@ -137,15 +293,22 @@ jobs:
           # -L${STAGING}/usr/lib and -I${STAGING}/usr/include directly,
           # with no dependency on PKG_CONFIG_SYSROOT_DIR path rewriting.
           echo "Patching pkg-config files with staging prefix: $STAGING"
-          for pc in sysroot/usr/lib/pkgconfig/*.pc; do
-            sed -i "s|^prefix=.*|prefix=${STAGING}/usr|" "$pc"
+          for pcdir in sysroot/usr/lib/pkgconfig sysroot/usr/lib64/pkgconfig sysroot/usr/share/pkgconfig; do
+            if [ -d "$pcdir" ]; then
+              for pc in "$pcdir"/*.pc; do
+                [ -f "$pc" ] || continue
+                sed -i "s|^prefix=.*|prefix=${STAGING}/usr|" "$pc"
+              done
+            fi
           done
 
           # Create a pkg-config wrapper that restricts to our sysroot only.
           # PKG_CONFIG_DIR= clears the default search path so system .pc files
           # (e.g. host libdrm) cannot interfere.
           PKG_CONFIG_WRAPPER="$(pwd)/aarch64-pkg-config"
-          printf '#!/bin/sh\nexport PKG_CONFIG_DIR=\nexport PKG_CONFIG_LIBDIR="%s/usr/lib/pkgconfig"\nexec pkg-config "$@"\n' \
+          printf '#!/bin/sh\nexport PKG_CONFIG_DIR=\nexport PKG_CONFIG_LIBDIR="%s/usr/lib/pkgconfig:%s/usr/lib64/pkgconfig:%s/usr/share/pkgconfig"\nexec pkg-config "$@"\n' \
+            "$STAGING" \
+            "$STAGING" \
             "$STAGING" > "$PKG_CONFIG_WRAPPER"
           chmod +x "$PKG_CONFIG_WRAPPER"
 
@@ -156,6 +319,10 @@ jobs:
           "$PKG_CONFIG_WRAPPER" --libs   librga
           if [ "${{ matrix.profile.name }}" = "rkmpp_software" ]; then
             "$PKG_CONFIG_WRAPPER" --libs x264
+            "$PKG_CONFIG_WRAPPER" --libs x265
+            "$PKG_CONFIG_WRAPPER" --variable=libdir x265 || true
+            "$PKG_CONFIG_WRAPPER" --libs vpx
+            "$PKG_CONFIG_WRAPPER" --libs aom
           fi
 
           # NOTE: No --sysroot. The Ubuntu cross-compiler uses its own multiarch
@@ -193,6 +360,18 @@ jobs:
           if [ "${{ matrix.profile.name }}" = "rkmpp_software" ]; then
             grep -q '^#define CONFIG_LIBX264 1' config.h || {
               echo "ERROR: software profile requested but libx264 is not enabled"
+              exit 1
+            }
+            grep -q '^#define CONFIG_LIBX265 1' config.h || {
+              echo "ERROR: software profile requested but libx265 is not enabled"
+              exit 1
+            }
+            grep -q '^#define CONFIG_LIBVPX 1' config.h || {
+              echo "ERROR: software profile requested but libvpx is not enabled"
+              exit 1
+            }
+            grep -q '^#define CONFIG_LIBAOM 1' config.h || {
+              echo "ERROR: software profile requested but libaom is not enabled"
               exit 1
             }
           fi
@@ -238,6 +417,21 @@ jobs:
 
           echo ""
           echo "✓ Verification passed"
+
+      - name: Summarize enabled codec profile
+        if: steps.profile_guard.outputs.run == 'true'
+        run: |
+          echo "=== Profile: ${{ matrix.profile.name }} ==="
+          echo "=== External software codec flags ==="
+          grep -E '^#define CONFIG_LIB(X264|X265|VPX|AOM) ' config.h || true
+          echo ""
+          echo "=== RKMPP codec flags ==="
+          grep -E '^#define CONFIG_(H264|HEVC|AV1|VP8|VP9|MJPEG)_RKMPP_(ENCODER|DECODER) ' config.h || true
+          echo ""
+          echo "=== Linked shared libraries (ffmpeg) ==="
+          aarch64-linux-gnu-readelf -d install/bin/ffmpeg \
+            | grep NEEDED | awk '{print $5}' | tr -d '[]' \
+            | grep -E 'x264|x265|vpx|aom|rockchip_mpp|rga' || true
 
       # ── Package ──────────────────────────────────────────────────────────────
       - name: Package release artifacts
