@@ -444,9 +444,50 @@ jobs:
           TARBALL_NAME="ffmpeg-rv1126b-${{ matrix.profile.artifact_suffix }}-${FFMPEG_VERSION}-${BUILD_DATE}-${COMMIT_SHORT}.tar.gz"
 
           mkdir -p dist/ffmpeg-rv1126b/bin
+          mkdir -p dist/ffmpeg-rv1126b/lib
 
           # Binaries
           cp install/bin/ffmpeg install/bin/ffprobe dist/ffmpeg-rv1126b/bin/
+
+          # Runtime libraries for software profile (Buildroot image has no ldconfig)
+          if [ "${{ matrix.profile.name }}" = "rkmpp_software" ]; then
+            for pat in libx264.so* libx265.so* libvpx.so* libaom.so*; do
+              cp -a sysroot/usr/lib/${pat} dist/ffmpeg-rv1126b/lib/ 2>/dev/null || true
+            done
+            for lib in libstdc++.so.6 libgcc_s.so.1 libatomic.so.1; do
+              p="$(aarch64-linux-gnu-gcc -print-file-name=${lib})"
+              if [ -n "$p" ] && [ "$p" != "$lib" ] && [ -e "$p" ]; then
+                cp -a "$p" dist/ffmpeg-rv1126b/lib/
+              fi
+            done
+          fi
+
+          # Wrapper launchers to inject local runtime library path
+          cat > dist/ffmpeg-rv1126b/bin/ffmpeg-rv1126b <<'EOF'
+          #!/bin/sh
+          SELF="$0"
+          if command -v readlink >/dev/null 2>&1; then
+            RESOLVED="$(readlink -f "$SELF" 2>/dev/null || true)"
+            [ -n "$RESOLVED" ] && SELF="$RESOLVED"
+          fi
+          HERE="$(CDPATH= cd -- "$(dirname "$SELF")" && pwd)"
+          export LD_LIBRARY_PATH="${HERE}/../lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/ffmpeg" "$@"
+          EOF
+          chmod +x dist/ffmpeg-rv1126b/bin/ffmpeg-rv1126b
+
+          cat > dist/ffmpeg-rv1126b/bin/ffprobe-rv1126b <<'EOF'
+          #!/bin/sh
+          SELF="$0"
+          if command -v readlink >/dev/null 2>&1; then
+            RESOLVED="$(readlink -f "$SELF" 2>/dev/null || true)"
+            [ -n "$RESOLVED" ] && SELF="$RESOLVED"
+          fi
+          HERE="$(CDPATH= cd -- "$(dirname "$SELF")" && pwd)"
+          export LD_LIBRARY_PATH="${HERE}/../lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/ffprobe" "$@"
+          EOF
+          chmod +x dist/ffmpeg-rv1126b/bin/ffprobe-rv1126b
 
           # On-device test script
           cp scripts/test-on-device.sh dist/ffmpeg-rv1126b/
@@ -465,11 +506,17 @@ jobs:
           Installation
           ------------
           tar xzf ${TARBALL_NAME} -C /usr/local/
-          ldconfig
+
+          # Buildroot images typically do not provide ldconfig.
+          # Use wrapper launchers (preferred):
+          /usr/local/bin/ffmpeg-rv1126b -version
+
+          # Or export runtime path manually:
+          export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 
           Verify
           ------
-          /usr/local/bin/ffmpeg -codecs | grep rkmpp
+          /usr/local/bin/ffmpeg-rv1126b -codecs | grep rkmpp
           EOF
 
           # Create tarball
