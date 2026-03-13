@@ -4,8 +4,8 @@ on:
   push:
     branches: [master]
     tags:
-      - 'v*-rv1126b-rkmpp'
-      - 'v*-rv1126b-rkmpp_software'
+      - 'v*-linux*-ffmpeg*-rkmpp'
+      - 'v*-linux*-ffmpeg*-rkmpp-sw'
   pull_request:
     branches: [master]
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
             artifact_suffix: rkmpp
             configure_flags: ""
           - name: rkmpp_software
-            artifact_suffix: rkmpp-software
+            artifact_suffix: rkmpp-sw
             configure_flags: "--enable-libx264 --enable-libx265 --enable-libvpx --enable-libaom"
     permissions:
       contents: write   # needed to create releases and upload assets
@@ -45,7 +45,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             if [[ "${{ matrix.profile.name }}" == "rkmpp" && "${GITHUB_REF_NAME}" == *-rkmpp ]]; then
               RUN=true
-            elif [[ "${{ matrix.profile.name }}" == "rkmpp_software" && "${GITHUB_REF_NAME}" == *-rkmpp_software ]]; then
+            elif [[ "${{ matrix.profile.name }}" == "rkmpp_software" && "${GITHUB_REF_NAME}" == *-rkmpp-sw ]]; then
               RUN=true
             fi
           else
