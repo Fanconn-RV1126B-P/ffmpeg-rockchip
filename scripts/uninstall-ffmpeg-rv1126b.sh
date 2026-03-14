@@ -106,7 +106,7 @@ if [ -n "$DEVICE_IP" ]; then
     ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
         -o BatchMode=no "$REMOTE" "exit" \
         || error "Cannot connect to ${REMOTE}"
-    ssh "$REMOTE" sh -c "$REMOVE_SCRIPT"
+    printf '%s' "$REMOVE_SCRIPT" | ssh "$REMOTE" sh
     success "Remote uninstall complete on ${REMOTE}"
 else
     [ "$ARCH" = "aarch64" ] || error "Running on $ARCH — supply a device IP or run on device"

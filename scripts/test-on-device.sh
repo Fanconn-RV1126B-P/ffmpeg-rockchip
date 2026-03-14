@@ -2,13 +2,30 @@
 #
 # test-on-device.sh
 # FFmpeg-Rockchip hardware and software codec test suite for RV1126B-P
-# Run this directly on the device after installation.
 #
-# Usage:
+# Usage (from host PC):
+#   sh scripts/test-on-device.sh <DEVICE_IP>
+#   DEVICE_IP=192.168.1.95 sh scripts/test-on-device.sh
+#
+# Usage (directly on device):
 #   sh /usr/local/ffmpeg-rv1126b/test-on-device.sh
-#   bash test-on-device.sh
 
 set -e
+
+# ── Remote dispatch ───────────────────────────────────────────────────
+# If called with a device IP from a non-aarch64 host, copy self to the
+# device and execute there, then stream output back.
+_DEVICE_IP="${1:-${DEVICE_IP:-}}"
+_DEVICE_USER="${DEVICE_USER:-root}"
+if [ -n "$_DEVICE_IP" ] && [ "$(uname -m)" != "aarch64" ]; then
+    REMOTE="${_DEVICE_USER}@${_DEVICE_IP}"
+    printf "[+] Remote mode: streaming test suite on %s\n" "$REMOTE"
+    _SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    scp -q "$_SELF" "${REMOTE}:/tmp/_test-on-device-run.sh"
+    ssh -t -o BatchMode=no "$REMOTE" \
+        'sh /tmp/_test-on-device-run.sh; _rc=$?; rm -f /tmp/_test-on-device-run.sh; exit $_rc'
+    exit $?
+fi
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; NC='\033[0m'
@@ -24,7 +41,7 @@ RESULTS_FILE="/tmp/ffmpeg-rv1126b-test-results.txt"
 PASS=0; FAIL=0; SKIP=0
 
 result_pass() { PASS=$((PASS+1)); success "$1"; echo "PASS: $1" >> "$RESULTS_FILE"; }
-result_fail() { FAIL=$((FAIL+1)); error  "$1"; echo "FAIL: $1" >> "$RESULTS_FILE"; }
+result_fail() { FAIL=$((FAIL+1)); printf "${RED}[✗]${NC} %s\n" "$1"; echo "FAIL: $1" >> "$RESULTS_FILE"; }
 result_skip() { SKIP=$((SKIP+1)); skip   "$1"; echo "SKIP: $1" >> "$RESULTS_FILE"; }
 
 # ── Auto-detect ffmpeg binary ─────────────────────────────────────────
@@ -109,11 +126,11 @@ printf "\n${YELLOW}[4] Generate test source video${NC}\n"
 TEST_SRC="$TEST_DIR/source.mp4"
 "$FFMPEG" -hide_banner -loglevel error -y \
     -f lavfi -i "testsrc=duration=5:size=1280x720:rate=25" \
-    -c:v libx264 -b:v 1M \
+    -c:v libx264 -pix_fmt yuv420p -b:v 1M \
     "$TEST_SRC" 2>/dev/null || \
 "$FFMPEG" -hide_banner -loglevel error -y \
     -f lavfi -i "testsrc=duration=5:size=1280x720:rate=25" \
-    -c:v mpeg4 -b:v 1M \
+    -c:v mpeg4 -pix_fmt yuv420p -b:v 1M \
     "$TEST_SRC" 2>/dev/null || true
 
 if [ -f "$TEST_SRC" ]; then

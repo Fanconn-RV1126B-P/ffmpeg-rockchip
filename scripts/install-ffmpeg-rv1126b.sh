@@ -56,7 +56,7 @@ ask_profile() {
             *)                          PROFILE="rkmpp" ;;
         esac
     fi
-    [ "$PROFILE" = "rkmpp_software" ] && PROFILE="rkmpp-sw"
+    if [ "$PROFILE" = "rkmpp_software" ]; then PROFILE="rkmpp-sw"; fi
 }
 
 fetch_to_file() {
