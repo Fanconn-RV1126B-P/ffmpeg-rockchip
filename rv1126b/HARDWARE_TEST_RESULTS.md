@@ -370,7 +370,7 @@ Cortex-A7 CPU, even when sharing the VPU with RKIPC.
 - **Cause**: Prebuilt libvpx uses ARM NEON/VFP instructions not present on Cortex-A7
 - **Impact**: VP8/VP9 software encode/decode crashes with illegal instruction
 - **Workaround**: Use `vp8_rkmpp`/`vp9_rkmpp` hardware decoders instead
-- **Status**: Non-critical -- documented in `rv1126b/todo.md`
+- **Status**: Non-critical -- VP8/VP9 hardware decoders work correctly
 
 ### 4. Frame Pixel Format
 - **Issue**: Source generation must use `-pix_fmt yuv420p` explicitly

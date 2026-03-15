@@ -81,8 +81,7 @@ scripts/
 ├── package-sysroot.sh               # Package sysroot for cross-compilation
 └── ffmpeg-rockchip-cross-compile-env.sh  # Cross-compile environment
 rv1126b/
-├── HARDWARE_TEST_RESULTS.md          # Detailed VPU benchmarks & analysis
-└── todo.md                           # Known issues tracker
+└── HARDWARE_TEST_RESULTS.md          # Detailed VPU benchmarks & analysis
 ```
 
 ---
