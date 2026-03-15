@@ -120,7 +120,7 @@ printf "\n${YELLOW}[4] Generate test source video${NC}\n"
 TEST_SRC="$TEST_DIR/source.mp4"
 "$FFMPEG" -hide_banner -loglevel error -y \
     -f lavfi -i "testsrc=duration=30:size=1280x720:rate=25,format=yuv420p" \
-    -c:v libx264 -b:v 2M \
+    -c:v libx264 -pix_fmt yuv420p -b:v 2M \
     "$TEST_SRC" 2>/dev/null || \
 "$FFMPEG" -hide_banner -loglevel error -y \
     -f lavfi -i "testsrc=duration=30:size=1280x720:rate=25,format=yuv420p" \
