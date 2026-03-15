@@ -14,8 +14,8 @@
 # across reboots). Only missing sources are generated on first run.
 #
 # Estimated runtime:
-#   First run  (source generation + tests): ~20 minutes
-#   Cached run (sources already present):   ~15 minutes
+#   First run  (source generation + tests): ~25 minutes
+#   Cached run (sources already present):   ~18 minutes
 #
 # For accurate results, stop RKIPC first — it consumes ~85% of VEPU:
 #   /etc/init.d/S99rkipc stop
@@ -235,13 +235,13 @@ printf "  Note:     VP8/VP9 HW decode supported but untested (no encoder to gene
 
 # ── Estimated runtime ─────────────────────────────────────────────────
 _cached=0
-for _f in source-h264.mp4 source-h265.mp4 source-mjpeg.avi source-4k-h264.mp4 source-4k-h265.mp4; do
+for _f in source-h264.mp4 source-h265.mp4 source-mjpeg.avi source-1080p-h264.mp4 source-1080p-h265.mp4 source-4k-h264.mp4 source-4k-h265.mp4; do
     [ -f "$SOURCE_DIR/$_f" ] && _cached=$((_cached + 1))
 done
-if [ "$_cached" -ge 5 ]; then
-    printf "\n  ${GREEN}All 5 test sources cached — estimated runtime: ~15 minutes${NC}\n"
+if [ "$_cached" -ge 7 ]; then
+    printf "\n  ${GREEN}All 7 test sources cached — estimated runtime: ~18 minutes${NC}\n"
 else
-    printf "\n  ${YELLOW}Source generation needed (%d/5 cached) — estimated runtime: ~20 minutes${NC}\n" "$_cached"
+    printf "\n  ${YELLOW}Source generation needed (%d/7 cached) — estimated runtime: ~25 minutes${NC}\n" "$_cached"
 fi
 
 # Results file header
@@ -255,7 +255,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════
 # [1/10] PRE-FLIGHT CHECKS
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[1/10] Pre-flight — FFmpeg version, device nodes, HW codec detection${NC}\n"
+printf "\n${YELLOW}[1/11] Pre-flight — FFmpeg version, device nodes, HW codec detection${NC}\n"
 
 if "$FFMPEG" -version 2>&1 | head -1 | grep -q ffmpeg; then
     "$FFMPEG" -version 2>&1 | head -1
@@ -274,15 +274,18 @@ done
 # ══════════════════════════════════════════════════════════════════════
 # [2/10] TEST SOURCE PREPARATION
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[2/10] Source preparation — cached in %s (persistent across reboots)${NC}\n" "$SOURCE_DIR"
+printf "\n${YELLOW}[2/11] Source preparation — cached in %s (persistent across reboots)${NC}\n" "$SOURCE_DIR"
 
 LAVFI_720="testsrc=duration=30:size=1280x720:rate=25,format=yuv420p"
+LAVFI_1080="testsrc=duration=30:size=1920x1080:rate=30,format=yuv420p"
 LAVFI_MJPEG="testsrc=duration=10:size=1280x720:rate=25,format=yuv420p"
 LAVFI_4K="testsrc=duration=30:size=3840x2160:rate=30,format=yuv420p"
 
 SRC_H264="$SOURCE_DIR/source-h264.mp4"
 SRC_H265="$SOURCE_DIR/source-h265.mp4"
 SRC_MJPEG="$SOURCE_DIR/source-mjpeg.avi"
+SRC_1080_H264="$SOURCE_DIR/source-1080p-h264.mp4"
+SRC_1080_H265="$SOURCE_DIR/source-1080p-h265.mp4"
 SRC_4K_H264="$SOURCE_DIR/source-4k-h264.mp4"
 SRC_4K_H265="$SOURCE_DIR/source-4k-h265.mp4"
 
@@ -329,6 +332,28 @@ fi
 _gen "$SRC_MJPEG" "MJPEG 720p 10s" \
     -f lavfi -i "$LAVFI_MJPEG" -c:v mjpeg -q:v 3 || true
 
+# 1080p H.264 30s — libx264
+_gen "$SRC_1080_H264" "1080p H.264 30s" \
+    -f lavfi -i "$LAVFI_1080" -c:v libx264 -pix_fmt yuv420p -b:v 4M || true
+
+# 1080p H.265 30s — prefer HW encoder, fallback to libx265
+if [ -f "$SRC_1080_H265" ] && [ -s "$SRC_1080_H265" ]; then
+    info "1080p H.265 30s: cached ($(du -h "$SRC_1080_H265" | cut -f1))"
+else
+    info "1080p H.265 30s: generating..."
+    if "$FFMPEG" -hide_banner -loglevel error -y \
+        -f lavfi -i "$LAVFI_1080" -c:v hevc_rkmpp -b:v 4M "$SRC_1080_H265" 2>/dev/null; then
+        success "1080p H.265 30s: ok ($(du -h "$SRC_1080_H265" | cut -f1)) [HW]"
+    elif "$FFMPEG" -hide_banner -loglevel error -y \
+        -f lavfi -i "$LAVFI_1080" -c:v libx265 -b:v 4M \
+        -x265-params "log-level=error" "$SRC_1080_H265" 2>/dev/null; then
+        success "1080p H.265 30s: ok ($(du -h "$SRC_1080_H265" | cut -f1)) [libx265]"
+    else
+        warn "1080p H.265 30s: FAILED"
+        rm -f "$SRC_1080_H265"
+    fi
+fi
+
 # 4K H.264 30s — HW encoder only (SW too slow for 4K)
 if echo "$HW_ENCODERS" | grep -qw h264_rkmpp; then
     _gen "$SRC_4K_H264" "4K H.264 30s" \
@@ -347,34 +372,44 @@ fi
 
 # Summary
 _total=0; _ok=0
-for _f in "$SRC_H264" "$SRC_H265" "$SRC_MJPEG" "$SRC_4K_H264" "$SRC_4K_H265"; do
+for _f in "$SRC_H264" "$SRC_H265" "$SRC_MJPEG" "$SRC_1080_H264" "$SRC_1080_H265" "$SRC_4K_H264" "$SRC_4K_H265"; do
     _total=$((_total + 1))
     [ -f "$_f" ] && [ -s "$_f" ] && _ok=$((_ok + 1))
 done
 result_pass "Source preparation: $_ok/$_total sources ready"
 
 # ══════════════════════════════════════════════════════════════════════
-# [3/10] HW DECODE — 720p
+# [3/11] HW DECODE — 720p
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[3/10] HW Decode 720p — H.264, H.265, MJPEG via VDPU (30s 1280x720@25fps 2Mbps)${NC}\n"
+printf "\n${YELLOW}[3/11] HW Decode 720p — H.264, H.265, MJPEG via VDPU (30s 1280x720@25fps 2Mbps)${NC}\n"
 
 hw_decode_test "h264_rkmpp"  "$SRC_H264"  "H.264 720p"
 hw_decode_test "hevc_rkmpp"  "$SRC_H265"  "H.265 720p"
 hw_decode_test "mjpeg_rkmpp" "$SRC_MJPEG" "MJPEG 720p"
 
 # ══════════════════════════════════════════════════════════════════════
-# [4/10] HW ENCODE — 720p
+# [4/11] HW ENCODE — 720p
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[4/10] HW Encode 720p — H.264, H.265, MJPEG via VEPU (30s 1280x720@25fps 2Mbps)${NC}\n"
+printf "\n${YELLOW}[4/11] HW Encode 720p — H.264, H.265, MJPEG via VEPU (30s 1280x720@25fps 2Mbps)${NC}\n"
 
 hw_encode_test "h264_rkmpp"  "$LAVFI_720"   "$TEST_DIR/enc-h264.mp4"  "-b:v 2M"         "H.264 720p"
 hw_encode_test "hevc_rkmpp"  "$LAVFI_720"   "$TEST_DIR/enc-h265.mp4"  "-b:v 2M"         "H.265 720p"
 hw_encode_test "mjpeg_rkmpp" "$LAVFI_MJPEG" "$TEST_DIR/enc-mjpeg.avi" "-q:v 3 -b:v 0"   "MJPEG 720p"
 
 # ══════════════════════════════════════════════════════════════════════
-# [5/10] 4K MAX-CAPABILITY
+# [5/11] HW DECODE/ENCODE — 1080p
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[5/10] 4K capability — H.264/H.265 decode + encode (30s 3840x2160@30fps 8Mbps)${NC}\n"
+printf "\n${YELLOW}[5/11] HW 1080p — H.264/H.265 decode + encode (30s 1920x1080@30fps 4Mbps)${NC}\n"
+
+hw_decode_test "h264_rkmpp"  "$SRC_1080_H264"  "H.264 1080p" "1080p"
+hw_decode_test "hevc_rkmpp"  "$SRC_1080_H265"  "H.265 1080p" "1080p"
+hw_encode_test "h264_rkmpp"  "$LAVFI_1080"   "$TEST_DIR/enc-1080p-h264.mp4"  "-b:v 4M"   "H.264 1080p"
+hw_encode_test "hevc_rkmpp"  "$LAVFI_1080"   "$TEST_DIR/enc-1080p-h265.mp4"  "-b:v 4M"   "H.265 1080p"
+
+# ══════════════════════════════════════════════════════════════════════
+# [6/11] 4K MAX-CAPABILITY
+# ══════════════════════════════════════════════════════════════════════
+printf "\n${YELLOW}[6/11] 4K capability — H.264/H.265 decode + encode (30s 3840x2160@30fps 8Mbps)${NC}\n"
 info "Note: 4K through FFmpeg is CPU-limited (~0.4x realtime). The VDPU hardware has"
 info "      headroom (~25% load) but FFmpeg's single-threaded pipeline on Cortex-A7"
 info "      cannot feed/drain 4K frames fast enough. RKIPC achieves 4K@30fps via DVBM"
@@ -386,9 +421,9 @@ hw_encode_test "h264_rkmpp" "$LAVFI_4K" "$TEST_DIR/enc-4k-h264.mp4" "-b:v 8M" "H
 hw_encode_test "hevc_rkmpp" "$LAVFI_4K" "$TEST_DIR/enc-4k-h265.mp4" "-b:v 8M" "H.265 4K"
 
 # ══════════════════════════════════════════════════════════════════════
-# [6/10] HW TRANSCODE
+# [7/11] HW TRANSCODE
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[6/10] HW Transcode — decode+encode pipelines (30s 720p, H.264 <-> H.265)${NC}\n"
+printf "\n${YELLOW}[7/11] HW Transcode — decode+encode pipelines (30s 720p, H.264 <-> H.265)${NC}\n"
 
 for _pair in "h264_rkmpp:h264_rkmpp:H.264->H.264:$SRC_H264:tc-h264-h264.mp4" \
              "h264_rkmpp:hevc_rkmpp:H.264->H.265:$SRC_H264:tc-h264-h265.mp4" \
@@ -420,9 +455,9 @@ for _pair in "h264_rkmpp:h264_rkmpp:H.264->H.264:$SRC_H264:tc-h264-h264.mp4" \
 done
 
 # ══════════════════════════════════════════════════════════════════════
-# [7/10] RGA VIDEO PROCESSING
+# [8/11] RGA VIDEO PROCESSING
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[7/10] RGA processing — hardware scale + colour-space conversion via RGA2${NC}\n"
+printf "\n${YELLOW}[8/11] RGA processing — hardware scale + colour-space conversion via RGA2${NC}\n"
 
 RGA_FILTERS=$("$FFMPEG" -hide_banner -filters 2>&1 | grep rkrga | awk '{print $2}' | tr '\n' ' ')
 [ -n "$RGA_FILTERS" ] && result_pass "RGA filters: $RGA_FILTERS" || warn "No RGA filters"
@@ -474,9 +509,9 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════
-# [8/10] SW PERFORMANCE COMPARISON
+# [9/11] SW PERFORMANCE COMPARISON
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[8/10] SW comparison — CPU-only decode/encode for HW speedup reference (30s 720p)${NC}\n"
+printf "\n${YELLOW}[9/11] SW comparison — CPU-only decode/encode for HW speedup reference (30s 720p)${NC}\n"
 info "Identical parameters to HW tests (1280x720@25fps 2Mbps) for direct comparison."
 
 SW_ENCODERS=$("$FFMPEG" -hide_banner -encoders 2>&1)
@@ -561,9 +596,9 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════
-# [9/10] HW vs SW COMPARISON TABLE
+# [10/11] HW vs SW COMPARISON TABLE
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[9/10] Performance summary — HW vs SW comparison table${NC}\n"
+printf "\n${YELLOW}[10/11] Performance summary — HW vs SW comparison table${NC}\n"
 
 _xs() { grep -oE 'speed=[0-9.]+x' "$1" 2>/dev/null | tail -1 | sed 's/speed=//'; }
 
@@ -589,13 +624,23 @@ _cmp() {
         "$_op" "${_hw:-N/A}" "${_sw:-N/A}" "$_mult"
 }
 
-printf "\n  ${BLUE}Source: 1280x720@25fps 30s 2Mbps (720p) | 3840x2160@30fps 30s 8Mbps (4K)${NC}\n"
+printf "\n  ${BLUE}Source: 720p 1280x720@25fps 2Mbps | 1080p 1920x1080@30fps 4Mbps | 4K 3840x2160@30fps 8Mbps${NC}\n"
 printf "  ${BLUE}%-28s %-10s %-10s %s${NC}\n" "Operation" "HW (rkmpp)" "SW (cpu)" "HW Speedup"
 printf "  ${BLUE}%-28s %-10s %-10s %s${NC}\n" "────────────────────────────" "──────────" "──────────" "──────────"
 _cmp "720p  H.264 decode"   "$_hw_dec_h264"  "$_sw_dec_h264"
 _cmp "720p  H.265 decode"   "$_hw_dec_h265"  "$_sw_dec_h265"
 _cmp "720p  H.264 encode"   "$_hw_enc_h264"  "$_sw_enc_h264"
 _cmp "720p  H.265 encode"   "$_hw_enc_h265"  "$_sw_enc_h265"
+
+# 1080p rows (no SW comparison at this resolution)
+_hw_dec_1080h264=$(_xs "$TEST_DIR/dec-h264_rkmpp-1080p.log")
+_hw_dec_1080h265=$(_xs "$TEST_DIR/dec-hevc_rkmpp-1080p.log")
+_hw_enc_1080h264=$(_xs "$TEST_DIR/enc-h264_rkmpp-enc-1080p-h264-mp4.log")
+_hw_enc_1080h265=$(_xs "$TEST_DIR/enc-hevc_rkmpp-enc-1080p-h265-mp4.log")
+_cmp "1080p H.264 decode"   "$_hw_dec_1080h264"  ""
+_cmp "1080p H.265 decode"   "$_hw_dec_1080h265"  ""
+_cmp "1080p H.264 encode"   "$_hw_enc_1080h264"  ""
+_cmp "1080p H.265 encode"   "$_hw_enc_1080h265"  ""
 
 # 4K rows (no SW comparison — too slow)
 _hw_dec_4kh264=$(_xs "$TEST_DIR/dec-h264_rkmpp-4k.log" 2>/dev/null)
@@ -606,14 +651,14 @@ _cmp "4K    H.264 decode *"  "$_hw_dec_4kh264" ""
 _cmp "4K    H.265 decode *"  "$_hw_dec_4kh265" ""
 _cmp "4K    H.264 encode *"  "$_hw_enc_4kh264" ""
 _cmp "4K    H.265 encode *"  "$_hw_enc_4kh265" ""
-printf "\n  ${BLUE}* 4K via FFmpeg is CPU-limited; VPU has ~75%% headroom (see section 5 note)${NC}\n"
+printf "\n  ${BLUE}* 4K via FFmpeg is CPU-limited; VPU has ~75%% headroom (see section 6 note)${NC}\n"
 printf "\n"
 result_pass "Comparison table printed"
 
 # ══════════════════════════════════════════════════════════════════════
-# [10/10] SYSTEM RESOURCES
+# [11/11] SYSTEM RESOURCES
 # ══════════════════════════════════════════════════════════════════════
-printf "\n${YELLOW}[10/10] System resources — CPU, memory, load${NC}\n"
+printf "\n${YELLOW}[11/11] System resources — CPU, memory, load${NC}\n"
 
 info "Memory:"
 free -h 2>/dev/null || grep -E 'MemTotal|MemFree|MemAvailable' /proc/meminfo || true

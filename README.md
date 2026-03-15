@@ -26,19 +26,20 @@
 - **HW decoders:** H.264, H.265, VP8, VP9, AV1, MJPEG
 - **RGA filters:** scale_rkrga, overlay_rkrga, vpp_rkrga
 
-### Performance summary (720p, RKIPC stopped)
+### Performance summary (RKIPC stopped, 30s tests)
 
-| Operation | HW (rkmpp) | SW (cpu) | HW Speedup |
-|-----------|-----------|----------|------------|
-| H.264 decode | 4.4x | 11.1x | 0.4x (but 25% vs 92% CPU) |
-| H.265 decode | 4.8x | 5.4x | 0.9x (but 26% vs 66% CPU) |
-| H.264 encode | **1.7x** | 0.81x | **2.1x** |
-| H.265 encode | **1.5x** | 0.16x | **9.7x** |
-| H.264→H.264 transcode | **2.8x** | — | — |
+| Resolution | H.264 decode | H.265 decode | H.264 encode | H.265 encode |
+|------------|-------------|-------------|-------------|-------------|
+| **720p** 1280×720@25fps | 4.4x | 4.8x | **1.7x** | **1.6x** |
+| **1080p** 1920×1080@30fps | 1.7x | 1.8x | 0.77x | 0.76x |
+| **4K** 3840×2160@30fps | 0.44x* | 0.45x* | 0.17x* | 0.17x* |
 
-> **4K (3840×2160@30fps):** Sub-realtime (~0.44x decode, ~0.17x encode) through FFmpeg due to CPU-limited single-threaded pipeline on Cortex-A7. The VPU has ~75% idle headroom — the bottleneck is CPU-side frame handling, not hardware. RKIPC achieves 4K@30fps via DVBM zero-copy (ISP→VPSS→VEPU, no CPU).
+720p SW baseline: libx264 encode 0.81x, libx265 encode 0.16x · HW transcode: 2.8x (H.264→H.264)
+HW encode advantage at 720p: **2.1x** over libx264, **10x** over libx265
 
-> **RKIPC contention:** When RKIPC is running (default on boot), it consumes ~85% of VEPU for 4K@30fps H.265 encoding, reducing FFmpeg encode throughput by ~3.5x. Stop it with `/etc/init.d/S99rkipc stop` for accurate benchmarks.
+> **\* 4K is CPU-limited, not VPU-limited.** The VPU has ~75% idle headroom during 4K — FFmpeg's single-threaded pipeline on Cortex-A7 is the bottleneck. RKIPC achieves 4K@30fps via DVBM zero-copy (ISP→VPSS→VEPU, no CPU).
+
+> **RKIPC contention:** When running (default on boot), RKIPC consumes ~85% of VEPU, reducing FFmpeg encode by ~3.5x. Stop with `/etc/init.d/S99rkipc stop`.
 
 Full results: [`rv1126b/HARDWARE_TEST_RESULTS.md`](rv1126b/HARDWARE_TEST_RESULTS.md) · Test suite docs: [`scripts/README.md`](scripts/README.md)
 

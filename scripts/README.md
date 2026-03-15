@@ -27,20 +27,21 @@ sh /usr/local/ffmpeg-rv1126b/test-on-device.sh
 
 ### What It Tests
 
-Ten sections covering the full RV1126B-P VPU capability:
+Eleven sections covering the full RV1126B-P VPU capability:
 
 | # | Section | Duration | Description |
 |---|---------|----------|-------------|
 | 1 | Pre-flight | ~5s | FFmpeg version, `/dev/mpp_service`, `/dev/rga`, HW codec detection |
-| 2 | Source preparation | 0–5 min | Generate/cache 5 test sources in `/userdata/ffmpeg-test-sources/` |
+| 2 | Source preparation | 0–5 min | Generate/cache 7 test sources in `/userdata/ffmpeg-test-sources/` |
 | 3 | HW Decode 720p | ~30s | H.264, H.265, MJPEG via VDPU (30s 1280×720@25fps) |
 | 4 | HW Encode 720p | ~60s | H.264, H.265, MJPEG via VEPU (30s 1280×720@25fps 2Mbps) |
-| 5 | 4K capability | ~10 min | H.264/H.265 decode + encode (30s 3840×2160@30fps 8Mbps) |
-| 6 | HW Transcode | ~40s | H.264↔H.265 decode+encode pipelines (30s 720p) |
-| 7 | RGA processing | ~5s | Hardware scale + colour-space conversion via RGA2 |
-| 8 | SW comparison | ~8 min | CPU-only decode/encode for HW speedup baseline |
-| 9 | Comparison table | instant | HW vs SW speedup summary |
-| 10 | System resources | instant | CPU, memory, load |
+| 5 | HW 1080p | ~3 min | H.264/H.265 decode + encode (30s 1920×1080@30fps 4Mbps) |
+| 6 | 4K capability | ~10 min | H.264/H.265 decode + encode (30s 3840×2160@30fps 8Mbps) |
+| 7 | HW Transcode | ~40s | H.264↔H.265 decode+encode pipelines (30s 720p) |
+| 8 | RGA processing | ~5s | Hardware scale + colour-space conversion via RGA2 |
+| 9 | SW comparison | ~8 min | CPU-only decode/encode for HW speedup baseline |
+| 10 | Comparison table | instant | HW vs SW speedup summary |
+| 11 | System resources | instant | CPU, memory, load |
 
 ### Per-Test Monitoring
 
@@ -61,14 +62,16 @@ Every test reports three resource dimensions:
 Test sources are generated once and cached in `/userdata/ffmpeg-test-sources/` (a 2GB persistent eMMC partition). Subsequent runs skip generation:
 
 ```
-[+] H.264 720p 30s: cached (2.1M)
-[+] H.265 720p 30s: cached (3.1M)
-[+] MJPEG 720p 10s: cached (6.1M)
-[+] 4K H.264 30s:   cached (17.2M)
-[+] 4K H.265 30s:   cached (4.8M)
+[+] H.264 720p 30s:   cached (2.1M)
+[+] H.265 720p 30s:   cached (3.1M)
+[+] MJPEG 720p 10s:   cached (6.1M)
+[+] 1080p H.264 30s:  cached (4.8M)
+[+] 1080p H.265 30s:  cached (2.8M)
+[+] 4K H.264 30s:     cached (17.2M)
+[+] 4K H.265 30s:     cached (4.8M)
 ```
 
-Total cache size: ~33 MB. To force regeneration, delete `/userdata/ffmpeg-test-sources/` on the device.
+Total cache size: ~41 MB. To force regeneration, delete `/userdata/ffmpeg-test-sources/` on the device.
 
 ### Prerequisites
 
@@ -107,29 +110,40 @@ The RV1126B-P has three video processing units:
 - RKIPC stopped (exclusive VPU access)
 - CPU governor: performance (1608 MHz quad Cortex-A7)
 - DDR: 480/600 MHz devfreq
-- All tests use 30s duration, CBR 2Mbps (720p) or 8Mbps (4K)
+- All tests use 30s duration, CBR 2Mbps (720p), 4Mbps (1080p), or 8Mbps (4K)
 
 ### 720p Performance (1280×720 @ 25fps)
 
 | Operation | HW (rkmpp) | SW (cpu) | HW Speedup |
 |-----------|-----------|----------|------------|
-| H.264 decode | **4.4x** | 11.1x | 0.4x |
+| H.264 decode | **4.4x** | 11.2x | 0.4x |
 | H.265 decode | **4.8x** | 5.4x | 0.9x |
 | H.264 encode | **1.7x** | 0.81x | **2.1x** |
-| H.265 encode | **1.5x** | 0.16x | **9.7x** |
+| H.265 encode | **1.6x** | 0.16x | **10x** |
 | MJPEG encode | **1.6x** | — | — |
 
 **Key insight:** HW decode appears "slower" than SW decode in raw speed because ffmpeg's HW path has overhead (DMA buffer management, format conversion). The real advantage is **CPU offload** — HW decode uses ~25% CPU vs SW decode at 92–95%. This frees CPU for application logic.
 
-HW encode is where hardware acceleration truly shines: **2.1x faster for H.264** and **9.7x faster for H.265** vs software, while using only ~53% CPU.
+HW encode is where hardware acceleration truly shines: **2.1x faster for H.264** and **10x faster for H.265** vs software, while using only ~53% CPU.
 
 ### 720p Transcode
 
 | Pipeline | Speed |
 |----------|-------|
 | H.264 → H.264 | **2.8x** realtime |
-| H.264 → H.265 | **2.8x** realtime |
+| H.264 → H.265 | **2.7x** realtime |
 | H.265 → H.264 | **2.9x** realtime |
+
+### 1080p Performance (1920×1080 @ 30fps)
+
+| Operation | HW (rkmpp) |
+|-----------|------------|
+| H.264 decode | **1.68x** |
+| H.265 decode | **1.79x** |
+| H.264 encode | 0.77x |
+| H.265 encode | 0.76x |
+
+1080p decode is comfortably above realtime. 1080p encode is below realtime (~23 fps) through FFmpeg due to the same CPU-limited lavfi pipeline that affects 4K. For real-world 1080p camera-to-encode pipelines, the VPU has ample headroom.
 
 ### 4K Performance (3840×2160 @ 30fps)
 
@@ -229,6 +243,8 @@ Test sources (persistent across reboots):
 ├── source-h264.mp4           # 720p 30s H.264
 ├── source-h265.mp4           # 720p 30s H.265
 ├── source-mjpeg.avi          # 720p 10s MJPEG
+├── source-1080p-h264.mp4     # 1080p 30s H.264
+├── source-1080p-h265.mp4     # 1080p 30s H.265
 ├── source-4k-h264.mp4        # 4K 30s H.264
 └── source-4k-h265.mp4        # 4K 30s H.265
 ```
