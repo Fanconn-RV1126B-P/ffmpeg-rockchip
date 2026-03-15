@@ -574,15 +574,16 @@ _sw_enc_h265=$(_xs "$TEST_DIR/enc-libx265.log")
 
 _cmp() {
     _op="$1"; _hw="$2"; _sw="$3"
-    if [ -n "$_hw" ] && [ -n "$_sw" ]; then
-        _hwn=$(echo "$_hw" | sed 's/x//'); _swn=$(echo "$_sw" | sed 's/x//')
-        _mult=$(awk "BEGIN{if($_swn>0) printf \"%.1f\", $_hwn/$_swn; else print \"N/A\"}" 2>/dev/null || echo "N/A")
-        printf "  %-28s ${GREEN}%-10s${NC} ${YELLOW}%-10s${NC} ${GREEN}%sx${NC}\n" "$_op" "$_hw" "$_sw" "$_mult"
-    elif [ -n "$_hw" ]; then
-        printf "  %-28s ${GREEN}%-10s${NC} ${YELLOW}%-10s${NC}\n" "$_op" "$_hw" "${_sw:-N/A (sw only)}"
-    else
-        printf "  %-28s ${GREEN}%-10s${NC} ${YELLOW}%-10s${NC}\n" "$_op" "${_hw:-N/A}" "${_sw:-N/A}"
-    fi
+    _mult="N/A"
+    # calculate speedup only when sw value looks like a numeric speed (e.g. "3.09x")
+    case "$_sw" in
+        [0-9]*)
+            _hwn=$(echo "$_hw" | sed 's/x//'); _swn=$(echo "$_sw" | sed 's/x//')
+            _mult=$(awk "BEGIN{if($_swn>0) printf \"%.1fx\", $_hwn/$_swn; else print \"N/A\"}" 2>/dev/null || echo "N/A")
+            ;;
+    esac
+    printf "  %-28s ${GREEN}%-10s${NC} ${YELLOW}%-10s${NC} ${GREEN}%-10s${NC}\n" \
+        "$_op" "${_hw:-N/A}" "${_sw:-N/A}" "$_mult"
 }
 
 printf "\n  ${BLUE}Source: 1280x720@25fps 30s 2Mbps (720p) | 3840x2160@30fps 30s 8Mbps (4K)${NC}\n"
@@ -600,8 +601,8 @@ _hw_enc_4kh264=$(_xs "$TEST_DIR/enc-h264_rkmpp-enc-4k-h264-mp4.log" 2>/dev/null)
 _hw_enc_4kh265=$(_xs "$TEST_DIR/enc-hevc_rkmpp-enc-4k-h265-mp4.log" 2>/dev/null)
 _cmp "4K    H.264 decode"   "$_hw_dec_4kh264" ""
 _cmp "4K    H.265 decode"   "$_hw_dec_4kh265" ""
-_cmp "4K    H.264 encode"   "$_hw_enc_4kh264" "(sw skipped)"
-_cmp "4K    H.265 encode"   "$_hw_enc_4kh265" "(sw skipped)"
+_cmp "4K    H.264 encode"   "$_hw_enc_4kh264" "(sw skip)"
+_cmp "4K    H.265 encode"   "$_hw_enc_4kh265" "(sw skip)"
 printf "\n"
 result_pass "HW vs SW comparison table printed"
 
