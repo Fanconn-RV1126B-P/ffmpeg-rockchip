@@ -1,51 +1,88 @@
-## RV1126B-P Status Summary (Initial)
+## RV1126B-P — Build, Test & Performance Validation
 
-> ⚠️ **Disclaimer:** This is an initial integration commit for testing and validation only. It is not yet a finalized production release process.
+> **No source code modifications.** The upstream [nyanmisaka/ffmpeg-rockchip](https://github.com/nyanmisaka/ffmpeg-rockchip) codebase (FFmpeg 6.1 + Rockchip MPP/RGA patches) compiles and runs correctly on RV1126B-P out of the box. This fork adds only CI/CD, packaging, deployment scripts, and hardware verification — all under `.github/`, `scripts/`, and `rv1126b/`.
 
-### What has been completed
-- Added GitHub Actions CI/CD workflow for RV1126B-P cross-compilation and artifact packaging.
-- Integrated RV1126B-P sysroot-based cross-build flow and cache strategy for repeatable builds.
-- Fixed CI/runtime issues found during bring-up (toolchain/sysroot compatibility and workflow stability).
-- Added and validated device-side test coverage for Rockchip MPP/RGA hardware acceleration.
-- Added host-driven installer script for release consumption:
-  - `scripts/install-ffmpeg-rv1126b.sh`
-  - supports host execution and remote install to target device over SSH/SCP.
-- Reorganized repository helper scripts into `scripts/` and test result documents into `rv1126b/`.
-- Updated release notes/assets and cleaned stale release artifacts.
+### What this fork provides
 
-### Current testing scope
-- Target platform: RV1126B-P (Linux 6.1, aarch64).
-- Verification focus: FFmpeg binary integrity, RKMPP codec availability, and on-device hardware path validation.
+1. **GitHub Actions CI pipeline** — cross-compiles FFmpeg against the RV1126B-P SDK sysroot, producing two build profiles:
+   - `rkmpp` — hardware codecs only (MPP decoders + encoders + RGA filters)
+   - `rkmpp_software` — hardware + software codecs (adds libx264, libx265, libvpx, libaom)
+2. **Deployment & management scripts** (`scripts/`):
+   - `install-ffmpeg-rv1126b.sh` / `uninstall-ffmpeg-rv1126b.sh` — install/remove on device
+   - `deploy-to-device.sh` — deploy build artifacts over SSH
+   - `test-on-device.sh` — comprehensive hardware & software codec test suite with VPU monitoring
+   - `package-sysroot.sh` — package cross-compilation sysroot
+   - `ffmpeg-rockchip-cross-compile-env.sh` — cross-compilation environment setup
+3. **Hardware verification & documentation** (`rv1126b/`, `scripts/README.md`):
+   - Full VPU performance benchmarks (720p and 4K, encode/decode/transcode)
+   - Per-test CPU, RAM, and VPU utilisation monitoring
+   - RKIPC VPU contention analysis and architectural findings
 
-### Installation (Host → Device)
+### Target platform
 
-Run from host PC:
+- **SoC:** RV1126B-P (quad Cortex-A7 @ 1608 MHz, Linux 6.1, aarch64)
+- **VPU:** RKVENC (VEPU511, core 480 MHz) + RKVDEC (VDPU384A, AXI 297 MHz) + RKJPEGD
+- **HW encoders:** H.264, H.265, MJPEG
+- **HW decoders:** H.264, H.265, VP8, VP9, AV1, MJPEG
+- **RGA filters:** scale_rkrga, overlay_rkrga, vpp_rkrga
+
+### Performance summary (720p, RKIPC stopped)
+
+| Operation | HW (rkmpp) | SW (cpu) | HW Speedup |
+|-----------|-----------|----------|------------|
+| H.264 decode | 4.4x | 11.1x | 0.4x (but 25% vs 92% CPU) |
+| H.265 decode | 4.8x | 5.4x | 0.9x (but 26% vs 66% CPU) |
+| H.264 encode | **1.7x** | 0.81x | **2.1x** |
+| H.265 encode | **1.5x** | 0.16x | **9.7x** |
+| H.264→H.264 transcode | **2.8x** | — | — |
+
+> **4K (3840×2160@30fps):** Sub-realtime (~0.44x decode, ~0.17x encode) through FFmpeg due to CPU-limited single-threaded pipeline on Cortex-A7. The VPU has ~75% idle headroom — the bottleneck is CPU-side frame handling, not hardware. RKIPC achieves 4K@30fps via DVBM zero-copy (ISP→VPSS→VEPU, no CPU).
+
+> **RKIPC contention:** When RKIPC is running (default on boot), it consumes ~85% of VEPU for 4K@30fps H.265 encoding, reducing FFmpeg encode throughput by ~3.5x. Stop it with `/etc/init.d/S99rkipc stop` for accurate benchmarks.
+
+Full results: [`rv1126b/HARDWARE_TEST_RESULTS.md`](rv1126b/HARDWARE_TEST_RESULTS.md) · Test suite docs: [`scripts/README.md`](scripts/README.md)
+
+### Installation
+
+From host PC (downloads latest release and installs over SSH):
 
 ```bash
 curl -fsSL https://github.com/Fanconn-RV1126B-P/ffmpeg-rockchip/releases/latest/download/install-ffmpeg-rv1126b.sh | sh -s -- <device_ip>
 ```
 
-On the device, set executable permission and PATH:
+Verify on device:
 
 ```bash
-chmod 755 /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/ffmpeg-test.sh
-export PATH=/usr/local/bin:$PATH
-hash -r
+ffmpeg -hide_banner -version
+ffmpeg -hide_banner -decoders | grep rkmpp
+ffmpeg -hide_banner -encoders | grep rkmpp
 ```
 
-Optional: make PATH persistent after reboot:
+Run the test suite:
 
 ```bash
-echo 'export PATH=/usr/local/bin:$PATH' >> /etc/profile
+# From host (auto-deploys and streams output):
+sh scripts/test-on-device.sh <device_ip>
+
+# Or directly on device:
+sh /tmp/test-on-device.sh
 ```
 
-Quick verification on device:
+### Repository structure (RV1126B-P additions only)
 
-```bash
-/usr/local/bin/ffmpeg -hide_banner -version
-ffmpeg -hide_banner -filters | grep -E 'scale_rkrga|vpp_rkrga|overlay_rkrga'
-ffmpeg -hide_banner -buildconf | grep -E 'rkrga|rkmpp'
-/usr/local/bin/ffmpeg-test.sh
+```
+.github/workflows/build.yml          # CI: cross-compile + package artifacts
+scripts/
+├── README.md                         # Script & test suite documentation
+├── test-on-device.sh                 # HW/SW codec test suite with VPU monitoring
+├── install-ffmpeg-rv1126b.sh         # Device installer
+├── uninstall-ffmpeg-rv1126b.sh       # Device uninstaller
+├── deploy-to-device.sh              # Deploy build over SSH
+├── package-sysroot.sh               # Package sysroot for cross-compilation
+└── ffmpeg-rockchip-cross-compile-env.sh  # Cross-compile environment
+rv1126b/
+├── HARDWARE_TEST_RESULTS.md          # Detailed VPU benchmarks & analysis
+└── todo.md                           # Known issues tracker
 ```
 
 ---
