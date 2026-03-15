@@ -75,6 +75,9 @@ Latest on-device run of `ffmpeg-test.sh` completed successfully, but logs includ
    - Define which MPP warning patterns are acceptable vs. release blockers.
    - Track warning frequency across runs for regressions.
 
+6. **[ ] Investigate libvpx SIGILL on RV1126B (optional, for performance comparison only)**
+   - Note: Hardware VP9 encoding/decoding is functional, so this is not critical.
+
 ## Proposed short-term conclusion for report
 
 Current RV1126B build is functionally usable for MPP decode/encode/transcode. However, RGA and DMA behavior are not yet comprehensively benchmarked for RV1126B-specific memory/performance tuning, and test script timing needs correction before drawing quantitative performance conclusions.
