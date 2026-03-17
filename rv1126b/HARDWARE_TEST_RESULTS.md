@@ -7,7 +7,7 @@
 ---
 
 ### Test Environment
-- **Device**: RV1126B-P EVB v1.2
+- **Device**: Fanconn RV1126B-P camera
 - **SoC**: Rockchip RV1126B (DT: `rockchip,rv1126bp-evb1-v12rockchip,rv1126b`)
 - **CPU**: Quad-core Cortex-A7 @ 1608 MHz max (`interactive` governor)
 - **RAM**: 3.9 GB
